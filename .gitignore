@@ -1,0 +1,60 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary Office lock files
+~$*.doc*
+~$*.xls*
+
+# Environment and IDEs
+.vscode/
+.idea/
+.env
+*.venv
+env/
+venv/
+
+# System files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Logs
+*.log
+
+# Sensitive Guest Data & Runtime Storage (NO JSONs, NO CSVs)
+*.json
+*.csv
+
+# Runtime generated Excel & Word documents (Templates are tracked)
+*.xlsx
+*.xls
+*.docx
+!TEMPLATES/**
+
+# Prevent tracking runtime generated outputs while preserving directory structure
+DATABASE/*
+!DATABASE/**/
+!DATABASE/**/.gitkeep
+
+BOOKING CALLS/*
+!BOOKING CALLS/**/
+!BOOKING CALLS/**/.gitkeep
+
+TRASH/*
+!TRASH/**/
+!TRASH/**/.gitkeep
+
+OUTPUT/*
+!OUTPUT/**/
+!OUTPUT/**/.gitkeep
+OUTPUT/OFFERS/*
+!OUTPUT/OFFERS/**/
+!OUTPUT/OFFERS/**/.gitkeep
+OUTPUT/TODAYS_LIST/*
+!OUTPUT/TODAYS_LIST/**/
+!OUTPUT/TODAYS_LIST/**/.gitkeep
+
+# Whitelist all .gitkeep markers
+!**/.gitkeep
