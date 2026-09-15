@@ -28,21 +28,17 @@ def _load_env_file():
 
 _load_env_file()
 
-ARRIVALS_FOLDER = os.path.abspath(os.path.join(BASE_DIR, "DATABASE"))
-FINAL_FOLDER = os.path.abspath(os.path.join(BASE_DIR, "OUTPUT", "OFFERS"))
+from data_manager import resolve_template_path, DATABASE_DIR, OUTPUT_DIR, TODAYS_LIST_DIR
 
-TEMPLATE_PATH = os.path.abspath(os.path.join(BASE_DIR, "TEMPLATES", "OFFER LIST TEMPLATE", "OFFER LIST TEMPLATE.docx"))
-if not os.path.exists(TEMPLATE_PATH):
-    TEMPLATE_PATH = os.path.abspath(os.path.join(BASE_DIR, "OFFER LIST TEMPLATE", "OFFER LIST TEMPLATE.docx"))
+ARRIVALS_FOLDER = os.path.abspath(DATABASE_DIR)
+FINAL_FOLDER = os.path.abspath(os.path.join(OUTPUT_DIR, "offers"))
+TODAY_LIST_FOLDER = os.path.abspath(TODAYS_LIST_DIR)
 
-TODAY_LIST_FOLDER = os.path.abspath(os.path.join(BASE_DIR, "OUTPUT", "TODAYS_LIST"))
+TEMPLATE_PATH = resolve_template_path("offer_list") or os.path.abspath(os.path.join(BASE_DIR, "templates", "offer list template", "OFFER LIST TEMPLATE.docx"))
 
-CAKE_TEMPLATE_PATH = os.path.abspath(os.path.join(BASE_DIR, "TEMPLATES", "CAKE MEMO TEMPLATE", "CAKE MEMO.docx"))
-if not os.path.exists(CAKE_TEMPLATE_PATH):
-    cake_memo_folder = "CAKE MEMO" if os.path.exists(os.path.abspath(os.path.join(BASE_DIR, "CAKE MEMO"))) else ("CAKE  MEMO" if os.path.exists(os.path.abspath(os.path.join(BASE_DIR, "CAKE  MEMO"))) else "CAKE MEMO")
-    CAKE_TEMPLATE_PATH = os.path.abspath(os.path.join(BASE_DIR, cake_memo_folder, "CAKE MEMO.docx"))
-
-CAKE_MEMO_TEMPLATE_PATH = CAKE_TEMPLATE_PATH
+CHECK_MEMO_TEMPLATE_PATH = resolve_template_path("check_memo") or os.path.abspath(os.path.join(BASE_DIR, "templates", "check memo template", "CHECK MEMO.docx"))
+CAKE_TEMPLATE_PATH = CHECK_MEMO_TEMPLATE_PATH
+CAKE_MEMO_TEMPLATE_PATH = CHECK_MEMO_TEMPLATE_PATH
 
 os.makedirs(FINAL_FOLDER, exist_ok=True)
 os.makedirs(TODAY_LIST_FOLDER, exist_ok=True)

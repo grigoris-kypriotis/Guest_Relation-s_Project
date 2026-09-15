@@ -181,29 +181,133 @@ class TestInHouseDataManager(unittest.TestCase):
         self.assertTrue(os.path.exists(dest1))
         self.assertTrue(os.path.exists(dest2))
 
-    def test_database_directory_structure_and_dismantle_subdirectories(self):
+    def test_database_directory_structure_and_designated_subdirectories(self):
         from data_manager import (
             DATABASE_DIR, MASTER_STATE_PATH, STATE_META_PATH,
-            CHECKOUT_HISTORY_PATH, ROOM_MOVES_HISTORY_PATH,
+            CHECKOUT_HISTORY_DIR, CHECKOUT_HISTORY_PATH,
+            ROOM_MOVES_DIR, ROOM_MOVES_HISTORY_PATH,
+            SANDY_BEACH_ARRIVALS_DIR, ARRIVALS_BEACH_PATH,
             BOOKING_CALLS_TODAY_DIR, ensure_workspace_directories
         )
+
+        ensure_workspace_directories()
 
         # 1. Verify paths are inside DATABASE_DIR
         self.assertTrue(MASTER_STATE_PATH.startswith(DATABASE_DIR))
         self.assertTrue(STATE_META_PATH.startswith(DATABASE_DIR))
         self.assertTrue(CHECKOUT_HISTORY_PATH.startswith(DATABASE_DIR))
         self.assertTrue(ROOM_MOVES_HISTORY_PATH.startswith(DATABASE_DIR))
+        self.assertTrue(ARRIVALS_BEACH_PATH.startswith(DATABASE_DIR))
         self.assertTrue(BOOKING_CALLS_TODAY_DIR.startswith(DATABASE_DIR))
 
-        # 2. Verify history files filenames directly in DATABASE/
-        self.assertEqual(os.path.basename(CHECKOUT_HISTORY_PATH), "check_out_history.json")
-        self.assertEqual(os.path.basename(ROOM_MOVES_HISTORY_PATH), "room_moves_history.json")
+        # 2. Verify root state files reside in DATABASE/ or DATABASE/DATABASE/
+        from data_manager import DATABASE_SUBDIR
+        self.assertIn(os.path.dirname(MASTER_STATE_PATH), [DATABASE_DIR, DATABASE_SUBDIR])
+        self.assertIn(os.path.dirname(STATE_META_PATH), [DATABASE_DIR, DATABASE_SUBDIR])
 
-        # 3. Verify that no subdirectories for checkout history or room moves history remain
-        sub_checkout = os.path.join(DATABASE_DIR, "CHECKOUT HISTORY")
-        sub_roommoves = os.path.join(DATABASE_DIR, "ROOM MOVES HISTORY")
-        self.assertFalse(os.path.exists(sub_checkout), "CHECKOUT HISTORY directory should not exist")
-        self.assertFalse(os.path.exists(sub_roommoves), "ROOM MOVES HISTORY directory should not exist")
+        # 3. Verify domain archives reside in designated subdirectories
+        self.assertEqual(os.path.dirname(CHECKOUT_HISTORY_PATH), CHECKOUT_HISTORY_DIR)
+        self.assertEqual(os.path.basename(CHECKOUT_HISTORY_DIR), "check out history")
+
+        self.assertEqual(os.path.dirname(ROOM_MOVES_HISTORY_PATH), ROOM_MOVES_DIR)
+        self.assertEqual(os.path.basename(ROOM_MOVES_DIR), "room moves")
+
+        self.assertEqual(os.path.dirname(ARRIVALS_BEACH_PATH), SANDY_BEACH_ARRIVALS_DIR)
+        self.assertTrue(os.path.exists(CHECKOUT_HISTORY_DIR))
+        self.assertTrue(os.path.exists(ROOM_MOVES_DIR))
+
+        # 4. Verify root JSON exclusivity (ONLY master_state.json and state_metadata.json)
+        root_jsons = {f for f in os.listdir(DATABASE_DIR) if f.endswith(".json")}
+        self.assertEqual(root_jsons, {"master_state.json", "state_metadata.json"})
+
+        # 5. Verify archives exist inside designated subdirectories
+        self.assertTrue(os.path.exists(CHECKOUT_HISTORY_PATH))
+        self.assertTrue(os.path.exists(ROOM_MOVES_HISTORY_PATH))
+        self.assertTrue(os.path.exists(ARRIVALS_BEACH_PATH))
+
+    def test_save_and_archive_json(self):
+        from data_manager import (
+            save_and_archive_json, DATABASE_DIR,
+            CHECKOUT_HISTORY_DIR, ROOM_MOVES_DIR, BOOKING_CALLS_TODAY_DIR
+        )
+
+        test_payload = {
+            "title": "Test Archiving",
+            "count": 42,
+            "characters": "Ελληνικά / UTF-8 & Special Chars: öäü"
+        }
+
+        # 1. Save directly to root of isolated test directory
+        saved_path = save_and_archive_json(test_payload, "master_state.json", base_dir=self.test_dir)
+        self.assertTrue(os.path.exists(saved_path))
+        self.assertEqual(os.path.dirname(saved_path), self.test_dir)
+
+        # Verify UTF-8 formatting and indentation
+        with open(saved_path, "r", encoding="utf-8") as f:
+            content = f.read()
+            loaded = json.loads(content)
+            self.assertEqual(loaded["count"], 42)
+            self.assertIn("Ελληνικά", content)
+            self.assertIn("\n    ", content)  # 4 spaces indentation
+
+        # 2. Save with explicit subfolder in isolated test directory
+        sub_saved_path = save_and_archive_json(test_payload, "test_sub_record.json", subfolder="check out history", base_dir=self.test_dir)
+        self.assertTrue(os.path.exists(sub_saved_path))
+        self.assertEqual(os.path.basename(os.path.dirname(sub_saved_path)), "check out history")
+
+        # 3. Automatic routing without explicit subfolder in isolated test directory
+        auto_co = save_and_archive_json(test_payload, "checkouts_today.json", base_dir=self.test_dir)
+        self.assertEqual(os.path.basename(os.path.dirname(auto_co)), "check out history")
+
+        auto_rm = save_and_archive_json(test_payload, "room_moves_yesterday.json", base_dir=self.test_dir)
+        self.assertEqual(os.path.basename(os.path.dirname(auto_rm)), "room moves")
+
+        auto_bc = save_and_archive_json(test_payload, "booking_calls_today.json", base_dir=self.test_dir)
+        self.assertEqual(os.path.basename(os.path.dirname(auto_bc)), "booking calls for today")
+
+    def test_template_resolution_protocol(self):
+        from data_manager import resolve_template_path, TEMPLATES_DIR
+        # 1. Booking calls template
+        bc_tpl = resolve_template_path("booking_calls")
+        self.assertIsNotNone(bc_tpl)
+        self.assertTrue(bc_tpl.lower().endswith(".xlsx"))
+        self.assertIn("booking calls template", bc_tpl.lower())
+
+        # 2. Offer list template
+        ol_tpl = resolve_template_path("offer_list")
+        self.assertIsNotNone(ol_tpl)
+        self.assertTrue(ol_tpl.lower().endswith(".docx"))
+        self.assertIn("offer list template", ol_tpl.lower())
+
+        # 3. Check memo template with cake memo fallback
+        cm_tpl = resolve_template_path("check_memo")
+        self.assertIsNotNone(cm_tpl)
+        self.assertTrue(cm_tpl.lower().endswith(".docx"))
+        # Must resolve to check memo template or fallback cake memo template
+        self.assertTrue("check memo template" in cm_tpl.lower() or "cake memo template" in cm_tpl.lower())
+
+    def test_property_abstraction_and_schema_tagging(self):
+        from data_manager import (
+            get_property_dir, get_property_arrivals_path, get_property_departures_path,
+            CHECKOUTS_TODAY_JSON
+        )
+        beach_dir = get_property_dir("sandy_beach")
+        self.assertTrue(str(beach_dir).lower().endswith("sandy beach"))
+
+        beach_arr = get_property_arrivals_path("sandy_beach")
+        self.assertTrue(str(beach_arr).lower().endswith(os.path.join("arrivals", "arrivals_today.json").lower()))
+
+        beach_dep = get_property_departures_path("sandy_beach")
+        self.assertTrue(str(beach_dep).lower().endswith(os.path.join("departures", "departures_today.json").lower()))
+
+        # Checkouts property tagging verification
+        from unittest.mock import patch, mock_open
+        mock_co = '{"property": "sandy_beach", "records": [], "total_records": 0}'
+        with patch("os.path.exists", return_value=True), patch("builtins.open", mock_open(read_data=mock_co)):
+            co_data = self.dm.load_checkouts_history()
+            self.assertIn("property", co_data)
+            self.assertEqual(co_data["property"], "sandy_beach")
+            self.assertIn("records", co_data)
 
 
 if __name__ == "__main__":

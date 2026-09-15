@@ -32,12 +32,14 @@ from PyQt6.QtGui import QFont, QColor
 
 from data_manager import (
     InHouseDataManager, BASE_DIR, DATABASE_DIR, OUTPUT_DIR,
-    BOOKING_CALLS_TODAY_DIR, BOOKING_CALLS_TODAY_JSON
+    BOOKING_CALLS_TODAY_DIR, BOOKING_CALLS_TODAY_JSON,
+    save_and_archive_json, resolve_template_path
 )
 
 BOOKING_CALLS_DIR = os.path.join(BASE_DIR, "BOOKING CALLS")
 BOOKING_CALLS_XLSX = os.path.join(BOOKING_CALLS_DIR, "BOOKING CALLS.xlsx")
-BOOKING_CALLS_STATE_PATH = os.path.join(BOOKING_CALLS_DIR, "booking_calls_state.json")
+TEMPLATE_BOOKING_CALLS_XLSX = resolve_template_path("booking_calls") or os.path.join(BASE_DIR, "templates", "booking calls template", "BOOKING CALLS.xlsx")
+BOOKING_CALLS_STATE_PATH = os.path.join(BOOKING_CALLS_TODAY_DIR, "booking_calls_state.json")
 
 os.makedirs(BOOKING_CALLS_DIR, exist_ok=True)
 os.makedirs(BOOKING_CALLS_TODAY_DIR, exist_ok=True)
@@ -71,6 +73,8 @@ def is_booking_com(reservation_data: Dict[str, Any]) -> bool:
     Returns True if and only if the reservation's travel agent / booker is BOOKING.COM.
     Completely filters out all other agencies (TUI, Expedia, Rainbow, etc.).
     """
+    if not isinstance(reservation_data, dict):
+        return False
     debtor = str(reservation_data.get("Χρεώστης", "")).strip()
     rate_plan = str(reservation_data.get("Τιμοκατάλογος", "")).strip()
     agency = str(reservation_data.get("agency", "")).strip()
@@ -187,21 +191,22 @@ class BookingCallsManager:
             return {}
 
     def save_calls_state(self, state: Dict[str, Any]):
-        """Persists master call notes and statuses to BOOKING CALLS/booking_calls_state.json."""
-        temp_path = self.state_path + ".tmp"
+        """Persists master call notes and statuses to DATABASE/booking calls for today/booking_calls_state.json."""
         try:
-            with open(temp_path, "w", encoding="utf-8") as f:
-                json.dump(state, f, ensure_ascii=False, indent=2)
-            if os.path.exists(self.state_path):
-                os.replace(temp_path, self.state_path)
+            target_fname = os.path.basename(self.state_path)
+            # If self.state_path is customized, save to dirname or subfolder
+            if self.state_path == BOOKING_CALLS_STATE_PATH:
+                save_and_archive_json(state, target_fname, subfolder="booking calls for today")
             else:
-                os.rename(temp_path, self.state_path)
+                os.makedirs(os.path.dirname(self.state_path), exist_ok=True)
+                temp_path = self.state_path + ".tmp"
+                with open(temp_path, "w", encoding="utf-8") as f:
+                    json.dump(state, f, ensure_ascii=False, indent=4)
+                if os.path.exists(self.state_path):
+                    os.replace(temp_path, self.state_path)
+                else:
+                    os.rename(temp_path, self.state_path)
         except Exception as e:
-            if os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except Exception:
-                    pass
             print(f"[BookingCallsManager] Error saving calls state: {e}")
 
     # -------------------------------------------------------------------------
@@ -227,9 +232,7 @@ class BookingCallsManager:
         return self.generate_today_booking_calls_json()
 
     def save_today_calls_json(self, calls_list: List[Dict[str, Any]]):
-        """Strictly saves today's booking calls into 'booking calls for today/booking_calls_today.json'."""
-        os.makedirs(os.path.dirname(self.today_json_path), exist_ok=True)
-        temp_path = self.today_json_path + ".tmp"
+        """Strictly saves today's booking calls into 'DATABASE/booking calls for today/booking_calls_today.json'."""
         try:
             payload = {
                 "date": date.today().strftime("%Y-%m-%d"),
@@ -237,18 +240,19 @@ class BookingCallsManager:
                 "total_calls": len(calls_list),
                 "calls": calls_list
             }
-            with open(temp_path, "w", encoding="utf-8") as f:
-                json.dump(payload, f, ensure_ascii=False, indent=2)
-            if os.path.exists(self.today_json_path):
-                os.replace(temp_path, self.today_json_path)
+            target_fname = os.path.basename(self.today_json_path)
+            if self.today_json_path == BOOKING_CALLS_TODAY_JSON:
+                save_and_archive_json(payload, target_fname, subfolder="booking calls for today")
             else:
-                os.rename(temp_path, self.today_json_path)
+                os.makedirs(os.path.dirname(self.today_json_path), exist_ok=True)
+                temp_path = self.today_json_path + ".tmp"
+                with open(temp_path, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, ensure_ascii=False, indent=4)
+                if os.path.exists(self.today_json_path):
+                    os.replace(temp_path, self.today_json_path)
+                else:
+                    os.rename(temp_path, self.today_json_path)
         except Exception as e:
-            if os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except Exception:
-                    pass
             print(f"[BookingCallsManager] Error saving today calls JSON: {e}")
 
     # -------------------------------------------------------------------------
@@ -256,9 +260,17 @@ class BookingCallsManager:
     # Excel Workbook Helpers
     # -------------------------------------------------------------------------
     def _get_or_create_workbook(self) -> openpyxl.Workbook:
-        """Loads BOOKING CALLS.xlsx or creates it with default sheets if missing."""
+        """Loads BOOKING CALLS.xlsx or copies it from TEMPLATES or creates it with default sheets if missing."""
         if os.path.exists(self.xlsx_path):
             return openpyxl.load_workbook(self.xlsx_path)
+        resolved_tpl = resolve_template_path("booking_calls") or TEMPLATE_BOOKING_CALLS_XLSX
+        if resolved_tpl and os.path.exists(resolved_tpl):
+            try:
+                import shutil
+                shutil.copy2(resolved_tpl, self.xlsx_path)
+                return openpyxl.load_workbook(self.xlsx_path)
+            except Exception as e:
+                print(f"[BookingCallsManager] Error copying template from {resolved_tpl}: {e}")
         wb = openpyxl.Workbook()
         ws_sheet1 = wb.active
         ws_sheet1.title = "Sheet 1"  # Preserved unpopulated per specification
@@ -338,6 +350,8 @@ class BookingCallsManager:
         date_to_rooms: Dict[date, List[str]] = {}
 
         for b_id, booking in master_state.items():
+            if not isinstance(booking, dict):
+                continue
             # Strict Booking.com Filter
             if not is_booking_com(booking):
                 continue
@@ -397,6 +411,8 @@ class BookingCallsManager:
 
         # Scan active in-house bookings
         for b_id, booking in master_state.items():
+            if not isinstance(booking, dict):
+                continue
             # Strict Booking.com Filter
             if not is_booking_com(booking):
                 continue

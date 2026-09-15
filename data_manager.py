@@ -13,8 +13,9 @@ import csv
 import json
 import shutil
 import re
+from pathlib import Path
 from datetime import datetime, date, timedelta
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Optional, Any, Union
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -27,28 +28,136 @@ from PyQt6.QtGui import QFont, QColor
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE_DIR = os.path.join(BASE_DIR, "DATABASE")
-SANDY_BEACH_DIR = os.path.join(DATABASE_DIR, "SANDY BEACH")
-SANDY_VILLAS_DIR = os.path.join(DATABASE_DIR, "SANDY VILLAS")
+DATABASE_SUBDIR = os.path.join(DATABASE_DIR, "DATABASE")
+TEMPLATES_DIR = os.path.join(BASE_DIR, "TEMPLATES")
 OUTPUT_DIR = os.path.join(BASE_DIR, "OUTPUT")
 TRASH_DIR = os.path.join(BASE_DIR, "TRASH")
-TODAYS_LIST_DIR = os.path.join(OUTPUT_DIR, "TODAYS_LIST")
+TODAYS_LIST_DIR = os.path.join(OUTPUT_DIR, "todays_list")
 BOOKING_CALLS_DIR = os.path.join(BASE_DIR, "BOOKING CALLS")
+
+# Target Subdirectories inside database/
 BOOKING_CALLS_TODAY_DIR = os.path.join(DATABASE_DIR, "booking calls for today")
+CHECKOUT_HISTORY_DIR = os.path.join(DATABASE_DIR, "check out history")
+ROOM_MOVES_DIR = os.path.join(DATABASE_DIR, "room moves")
+
+# Target JSON Artifacts
+MASTER_STATE_PATH = os.path.join(DATABASE_SUBDIR, "master_state.json")
+MASTER_STATE_ROOT_PATH = os.path.join(DATABASE_DIR, "master_state.json")
+STATE_META_PATH = os.path.join(DATABASE_SUBDIR, "state_metadata.json")
+STATE_META_ROOT_PATH = os.path.join(DATABASE_DIR, "state_metadata.json")
+
 BOOKING_CALLS_TODAY_JSON = os.path.join(BOOKING_CALLS_TODAY_DIR, "booking_calls_today.json")
+BOOKING_CALLS_STATE_PATH = os.path.join(BOOKING_CALLS_TODAY_DIR, "booking_calls_state.json")
 
-# Explicit State Files inside DATABASE/ (not in root directory)
-MASTER_STATE_PATH = os.path.join(DATABASE_DIR, "master_state.json")
-STATE_META_PATH = os.path.join(DATABASE_DIR, "state_metadata.json")
+CHECKOUTS_TODAY_JSON = os.path.join(CHECKOUT_HISTORY_DIR, "checkouts_today.json")
+CHECKOUT_HISTORY_PATH = CHECKOUTS_TODAY_JSON  # Alias for backward compatibility
 
-# History & Audit Logs directly inside DATABASE/ (no separate subdirectories)
-CHECKOUT_HISTORY_PATH = os.path.join(DATABASE_DIR, "check_out_history.json")
+ROOM_MOVES_YESTERDAY_JSON = os.path.join(ROOM_MOVES_DIR, "room_moves_yesterday.json")
+ROOM_MOVES_HISTORY_PATH = ROOM_MOVES_YESTERDAY_JSON  # Alias for backward compatibility
 ROOM_MOVES_LOG_PATH = os.path.join(TODAYS_LIST_DIR, "room_moves.log")
-ROOM_MOVES_HISTORY_PATH = os.path.join(DATABASE_DIR, "room_moves_history.json")
 
-# Designated Property Arrivals State JSON Files
-ARRIVALS_STATE_PATH = os.path.join(DATABASE_DIR, "arrivals_state.json")
-ARRIVALS_BEACH_PATH = os.path.join(SANDY_BEACH_DIR, "arrivals_sandy_beach.json")
-ARRIVALS_VILLAS_PATH = os.path.join(SANDY_VILLAS_DIR, "arrivals_sandy_villas.json")
+# Property Abstraction Layer
+DEFAULT_PROPERTY = "sandy_beach"
+active_property = DEFAULT_PROPERTY
+
+def get_property_dir(property_name: str = DEFAULT_PROPERTY, base_dir: Optional[Union[str, Path]] = None) -> Path:
+    """Returns the Path directory for the specified property (e.g. 'sandy beach' or 'sandy villas')."""
+    db_root = Path(base_dir) if base_dir else Path(DATABASE_DIR)
+    norm = property_name.lower().replace("_", " ")
+    return db_root / norm
+
+def get_property_arrivals_path(property_name: str = DEFAULT_PROPERTY, base_dir: Optional[Union[str, Path]] = None) -> Path:
+    """Returns the Path to arrivals_today.json for the specified property."""
+    return get_property_dir(property_name, base_dir) / "arrivals" / "arrivals_today.json"
+
+def get_property_departures_path(property_name: str = DEFAULT_PROPERTY, base_dir: Optional[Union[str, Path]] = None) -> Path:
+    """Returns the Path to departures_today.json for the specified property."""
+    return get_property_dir(property_name, base_dir) / "departures" / "departures_today.json"
+
+# Property-specific directories and paths
+SANDY_BEACH_DIR = str(get_property_dir("sandy_beach"))
+SANDY_BEACH_ARRIVALS_DIR = str(get_property_dir("sandy_beach") / "arrivals")
+SANDY_BEACH_DEPARTURES_DIR = str(get_property_dir("sandy_beach") / "departures")
+ARRIVALS_BEACH_PATH = str(get_property_arrivals_path("sandy_beach"))
+DEPARTURES_BEACH_PATH = str(get_property_departures_path("sandy_beach"))
+
+SANDY_VILLAS_DIR = str(get_property_dir("sandy_villas"))
+SANDY_VILLAS_ARRIVALS_DIR = str(get_property_dir("sandy_villas") / "arrivals")
+SANDY_VILLAS_DEPARTURES_DIR = str(get_property_dir("sandy_villas") / "departures")
+ARRIVALS_VILLAS_PATH = str(get_property_arrivals_path("sandy_villas"))
+DEPARTURES_VILLAS_PATH = str(get_property_departures_path("sandy_villas"))
+
+ARRIVALS_STATE_PATH = ARRIVALS_BEACH_PATH
+DEPARTURES_STATE_PATH = DEPARTURES_BEACH_PATH
+
+def resolve_template_path(template_type: str, base_templates_dir: Optional[Union[str, Path]] = None) -> Optional[str]:
+    """
+    Template Resolution Protocol:
+      - 'booking_calls': searches templates/booking calls template/ for BOOKING CALLS.xlsx
+                         (case-insensitive search for any .xlsx within this directory).
+      - 'check_memo' / 'cake_memo': searches templates/check memo template/ for .docx (CHECK MEMO.docx);
+                         if missing or empty, falls back to templates/cake memo template/ for .docx.
+      - 'offer_list': searches templates/offer list template/ for OFFER LIST TEMPLATE.docx
+                         (case-insensitive search for .docx within this directory).
+    Returns the resolved absolute path as a string, or None if not found.
+    """
+    root_tpl = Path(base_templates_dir) if base_templates_dir else Path(TEMPLATES_DIR)
+
+    def find_dir(parent: Path, name: str) -> Optional[Path]:
+        if not parent.exists():
+            return None
+        target_lower = name.lower()
+        for item in parent.iterdir():
+            if item.is_dir() and item.name.lower() == target_lower:
+                return item
+        return parent / name
+
+    def find_file(directory: Path, filename: str, ext: str) -> Optional[Path]:
+        if not directory.exists() or not directory.is_dir():
+            return None
+        for item in directory.iterdir():
+            if item.is_file() and item.name.lower() == filename.lower():
+                return item
+        for item in directory.iterdir():
+            if item.is_file() and item.name.lower().endswith(ext.lower()):
+                return item
+        return None
+
+    ttype = template_type.lower().strip()
+    if "booking" in ttype or "call" in ttype:
+        d = find_dir(root_tpl, "booking calls template")
+        if d:
+            f = find_file(d, "BOOKING CALLS.xlsx", ".xlsx")
+            if f:
+                return str(f.resolve())
+            return str((d / "BOOKING CALLS.xlsx").resolve())
+        return str((root_tpl / "booking calls template" / "BOOKING CALLS.xlsx").resolve())
+
+    elif "offer" in ttype:
+        d = find_dir(root_tpl, "offer list template")
+        if d:
+            f = find_file(d, "OFFER LIST TEMPLATE.docx", ".docx")
+            if f:
+                return str(f.resolve())
+            return str((d / "OFFER LIST TEMPLATE.docx").resolve())
+        return str((root_tpl / "offer list template" / "OFFER LIST TEMPLATE.docx").resolve())
+
+    elif "check" in ttype or "cake" in ttype or "memo" in ttype:
+        primary_dir = find_dir(root_tpl, "check memo template")
+        if primary_dir and primary_dir.exists():
+            f = find_file(primary_dir, "CHECK MEMO.docx", ".docx")
+            if f:
+                return str(f.resolve())
+        fallback_dir = find_dir(root_tpl, "cake memo template")
+        if fallback_dir and fallback_dir.exists():
+            f = find_file(fallback_dir, "CAKE MEMO.docx", ".docx")
+            if f:
+                return str(f.resolve())
+            return str((fallback_dir / "CAKE MEMO.docx").resolve())
+        dest = root_tpl / "check memo template" / "CHECK MEMO.docx"
+        return str(dest.resolve())
+
+    return None
 
 # Active Python Whitelist for Autonomous Cleanup
 ACTIVE_PYTHON_WHITELIST = {
@@ -61,42 +170,188 @@ ACTIVE_PYTHON_WHITELIST = {
 }
 
 
+def safe_rmtree(path: str):
+    """Safely removes a directory even if it has Windows ReadOnly attributes or is a ReparsePoint."""
+    if not os.path.exists(path):
+        return
+    import stat
+    def on_exc(func, p, exc_info):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except Exception:
+            pass
+    try:
+        shutil.rmtree(path, onexc=on_exc)
+    except Exception:
+        pass
+
+
+def save_and_archive_json(data: Any, target_filename: str, subfolder: Optional[str] = None, base_dir: Optional[str] = None) -> str:
+    """
+    Centralized, synchronous, and atomic JSON persistence helper.
+    Ensures all writes occur strictly within DATABASE/ (or DATABASE/<subfolder>/),
+    automatically routing domain-specific datasets to their designated subdirectories.
+    Writes atomically via a .tmp file, using encoding='utf-8', indent=4, ensure_ascii=False.
+    Returns the absolute path to the saved file.
+    """
+    base_name = os.path.basename(target_filename)
+
+    # Automatic routing if subfolder is not explicitly specified and target is relative
+    if subfolder is None and not os.path.isabs(target_filename):
+        lower_name = base_name.lower()
+        if "master_state" in lower_name or "state_meta" in lower_name:
+            if base_dir is None:
+                subfolder = "database"
+        elif "booking" in lower_name or "call" in lower_name:
+            subfolder = "booking calls for today"
+        elif "checkout" in lower_name or "check_out" in lower_name:
+            subfolder = "check out history"
+        elif "room_move" in lower_name or "room move" in lower_name:
+            subfolder = "room moves"
+        elif "arrival" in lower_name:
+            if "villa" in lower_name:
+                subfolder = "sandy villas/arrivals"
+            else:
+                subfolder = "sandy beach/arrivals"
+        elif "departure" in lower_name:
+            if "villa" in lower_name:
+                subfolder = "sandy villas/departures"
+            else:
+                subfolder = "sandy beach/departures"
+    elif subfolder:
+        norm_sub = subfolder.strip().replace("\\", "/").lower()
+        if norm_sub in ["booking calls for today", "booking_calls_for_today", "booking calls"]:
+            subfolder = "booking calls for today"
+        elif norm_sub in ["check out history", "check_out_history", "checkout history"]:
+            subfolder = "check out history"
+        elif norm_sub in ["room moves", "room_moves", "room moves history"]:
+            subfolder = "room moves"
+        elif "sandy beach" in norm_sub and "arrival" in norm_sub:
+            subfolder = "sandy beach/arrivals"
+        elif "sandy beach" in norm_sub and "departure" in norm_sub:
+            subfolder = "sandy beach/departures"
+        elif "sandy villas" in norm_sub and "arrival" in norm_sub:
+            subfolder = "sandy villas/arrivals"
+        elif "sandy villas" in norm_sub and "departure" in norm_sub:
+            subfolder = "sandy villas/departures"
+        elif norm_sub == "database":
+            subfolder = "database"
+
+    if os.path.isabs(target_filename):
+        target_path = target_filename
+        target_dir = os.path.dirname(target_path)
+    else:
+        root = base_dir if base_dir else DATABASE_DIR
+        if subfolder:
+            target_dir = os.path.join(root, subfolder)
+        else:
+            target_dir = root
+        target_path = os.path.join(target_dir, base_name)
+
+    os.makedirs(target_dir, exist_ok=True)
+    import time
+    import uuid
+    temp_path = os.path.join(target_dir, f".{base_name}.{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+
+        replaced = False
+        for attempt in range(4):
+            try:
+                if os.path.exists(target_path):
+                    os.replace(temp_path, target_path)
+                else:
+                    os.rename(temp_path, target_path)
+                replaced = True
+                break
+            except (PermissionError, OSError):
+                if attempt < 3:
+                    time.sleep(0.05)
+
+        if not replaced:
+            with open(target_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+        raise e
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+
+    # Mirroring logic for master state & metadata between database/database/ and database/
+    if base_dir is None and not os.path.isabs(target_filename):
+        if base_name in ["master_state.json", "state_metadata.json"]:
+            if str(subfolder).lower() == "database":
+                mirror_path = os.path.join(DATABASE_DIR, base_name)
+            else:
+                mirror_path = os.path.join(DATABASE_SUBDIR, base_name)
+            try:
+                os.makedirs(os.path.dirname(mirror_path), exist_ok=True)
+                with open(mirror_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=4)
+            except Exception:
+                pass
+
+    return target_path
+
+
 def ensure_workspace_directories():
     """
     Autonomously verifies, creates, and corrects all workspace folder structures.
     Enforces:
-      - master_state.json and state_metadata.json strictly inside DATABASE/
-      - check_out_history.json and room_moves_history.json directly inside DATABASE/
-        (strictly dismantling any separate 'check out history' or 'room moves history' subdirectories)
+      - Root State Files: ONLY master_state.json and state_metadata.json strictly inside database/
+      - checkouts_today.json strictly inside database/check out history/
+      - room_moves_yesterday.json strictly inside database/room moves/
+      - arrivals_today.json strictly inside database/sandy beach/arrivals/
+      - departures_today.json strictly inside database/sandy beach/departures/
       - today's booking calls JSON strictly inside database/booking calls for today/
-      - automated routing of all other JSON files into designated directories
+      - automated routing of all domain-specific JSON files into designated subdirectories inside database/
     """
     dirs_to_create = [
         DATABASE_DIR,
+        DATABASE_SUBDIR,
         SANDY_BEACH_DIR,
+        SANDY_BEACH_ARRIVALS_DIR,
+        SANDY_BEACH_DEPARTURES_DIR,
         SANDY_VILLAS_DIR,
+        SANDY_VILLAS_ARRIVALS_DIR,
+        SANDY_VILLAS_DEPARTURES_DIR,
+        CHECKOUT_HISTORY_DIR,
+        ROOM_MOVES_DIR,
+        TEMPLATES_DIR,
+        os.path.join(TEMPLATES_DIR, "booking calls template"),
+        os.path.join(TEMPLATES_DIR, "check memo template"),
+        os.path.join(TEMPLATES_DIR, "cake memo template"),
+        os.path.join(TEMPLATES_DIR, "offer list template"),
         OUTPUT_DIR,
-        TRASH_DIR,
+        os.path.join(OUTPUT_DIR, "offers"),
         TODAYS_LIST_DIR,
+        TRASH_DIR,
         BOOKING_CALLS_DIR,
         BOOKING_CALLS_TODAY_DIR
     ]
     for d in dirs_to_create:
         os.makedirs(d, exist_ok=True)
 
-    # 1. State files strictly inside DATABASE/ (migrate from root if present)
+    # 1. State files strictly inside database/database/ and mirrored to database/ root
     root_master = os.path.join(BASE_DIR, "master_state.json")
     if os.path.exists(root_master):
         try:
             if not os.path.exists(MASTER_STATE_PATH):
                 shutil.move(root_master, MASTER_STATE_PATH)
             else:
-                if os.path.getsize(root_master) > os.path.getsize(MASTER_STATE_PATH):
-                    shutil.move(root_master, MASTER_STATE_PATH)
-                else:
-                    os.remove(root_master)
-        except Exception as e:
-            print(f"[FileManager] Error migrating master_state.json: {e}")
+                os.remove(root_master)
+        except Exception:
+            pass
 
     root_meta = os.path.join(BASE_DIR, "state_metadata.json")
     if os.path.exists(root_meta):
@@ -105,93 +360,126 @@ def ensure_workspace_directories():
                 shutil.move(root_meta, STATE_META_PATH)
             else:
                 os.remove(root_meta)
-        except Exception as e:
-            print(f"[FileManager] Error migrating state_metadata.json: {e}")
+        except Exception:
+            pass
 
-    # 2. check_out_history.json directly inside DATABASE/ (no subdirectories)
-    # Check for legacy checkout_history.json without underscore
-    legacy_checkout = os.path.join(DATABASE_DIR, "checkout_history.json")
-    if os.path.exists(legacy_checkout):
-        try:
-            if not os.path.exists(CHECKOUT_HISTORY_PATH):
-                shutil.move(legacy_checkout, CHECKOUT_HISTORY_PATH)
-            else:
-                try:
-                    with open(CHECKOUT_HISTORY_PATH, "r", encoding="utf-8") as f:
-                        cur_data = json.load(f)
-                    with open(legacy_checkout, "r", encoding="utf-8") as f:
-                        leg_data = json.load(f)
-                    if isinstance(cur_data, list) and isinstance(leg_data, list):
-                        cur_data.extend(leg_data)
-                        with open(CHECKOUT_HISTORY_PATH, "w", encoding="utf-8") as f:
-                            json.dump(cur_data, f, ensure_ascii=False, indent=2)
-                except Exception:
-                    pass
-                os.remove(legacy_checkout)
-        except Exception as e:
-            print(f"[FileManager] Error consolidating checkout_history: {e}")
-
-    # Dismantle any separate 'CHECKOUT HISTORY' subdirectory in DATABASE/
-    checkout_subdirs = [
-        os.path.join(DATABASE_DIR, "CHECKOUT HISTORY"),
-        os.path.join(DATABASE_DIR, "checkout history"),
-        os.path.join(DATABASE_DIR, "check out history")
-    ]
-    for sub in checkout_subdirs:
-        if os.path.exists(sub) and os.path.isdir(sub):
+    # Ensure master_state.json exists and contains a valid bookings dict
+    master_data = {}
+    for cand in [MASTER_STATE_PATH, MASTER_STATE_ROOT_PATH]:
+        if os.path.exists(cand):
             try:
-                for fname in os.listdir(sub):
-                    fpath = os.path.join(sub, fname)
-                    if fname.endswith(".json") and os.path.isfile(fpath):
-                        try:
-                            with open(fpath, "r", encoding="utf-8") as f:
-                                sub_data = json.load(f)
-                            if os.path.exists(CHECKOUT_HISTORY_PATH):
-                                with open(CHECKOUT_HISTORY_PATH, "r", encoding="utf-8") as f:
-                                    cur_data = json.load(f)
-                                if isinstance(cur_data, list) and isinstance(sub_data, list):
-                                    cur_data.extend(sub_data)
-                                    with open(CHECKOUT_HISTORY_PATH, "w", encoding="utf-8") as f:
-                                        json.dump(cur_data, f, ensure_ascii=False, indent=2)
-                            else:
-                                shutil.move(fpath, CHECKOUT_HISTORY_PATH)
-                        except Exception:
-                            pass
-                shutil.rmtree(sub, ignore_errors=True)
-            except Exception as e:
-                print(f"[FileManager] Error removing checkout subdirectory {sub}: {e}")
+                with open(cand, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                if isinstance(d, dict) and "title" not in d:
+                    master_data = d
+                    break
+            except Exception:
+                pass
+    save_and_archive_json(master_data, "master_state.json", subfolder="database")
+    save_and_archive_json(master_data, "master_state.json", subfolder=None)
 
-    # 3. room_moves_history.json directly inside DATABASE/ (no subdirectories)
-    room_moves_subdirs = [
-        os.path.join(DATABASE_DIR, "ROOM MOVES HISTORY"),
-        os.path.join(DATABASE_DIR, "room moves history"),
-        os.path.join(DATABASE_DIR, "room_moves_history")
-    ]
-    for sub in room_moves_subdirs:
-        if os.path.exists(sub) and os.path.isdir(sub):
+    # Ensure state_metadata.json exists and contains valid metadata
+    meta_data = {
+        "last_processed_date": None,
+        "last_updated_at": None,
+        "total_bookings": len(master_data)
+    }
+    for cand in [STATE_META_PATH, STATE_META_ROOT_PATH]:
+        if os.path.exists(cand):
             try:
-                for fname in os.listdir(sub):
-                    fpath = os.path.join(sub, fname)
-                    if fname.endswith(".json") and os.path.isfile(fpath):
-                        try:
-                            with open(fpath, "r", encoding="utf-8") as f:
-                                sub_data = json.load(f)
-                            if os.path.exists(ROOM_MOVES_HISTORY_PATH):
-                                with open(ROOM_MOVES_HISTORY_PATH, "r", encoding="utf-8") as f:
-                                    cur_data = json.load(f)
-                                if isinstance(cur_data, list) and isinstance(sub_data, list):
-                                    cur_data.extend(sub_data)
-                                    with open(ROOM_MOVES_HISTORY_PATH, "w", encoding="utf-8") as f:
-                                        json.dump(cur_data, f, ensure_ascii=False, indent=2)
-                            else:
-                                shutil.move(fpath, ROOM_MOVES_HISTORY_PATH)
-                        except Exception:
-                            pass
-                shutil.rmtree(sub, ignore_errors=True)
-            except Exception as e:
-                print(f"[FileManager] Error removing room moves subdirectory {sub}: {e}")
+                with open(cand, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                if isinstance(d, dict) and "title" not in d:
+                    meta_data = d
+                    break
+            except Exception:
+                pass
+    save_and_archive_json(meta_data, "state_metadata.json", subfolder="database")
+    save_and_archive_json(meta_data, "state_metadata.json", subfolder=None)
 
-    # 4. Route today's booking calls JSON to database/booking calls for today/
+    # 3. checkouts_today.json strictly inside database/check out history/
+    legacy_checkouts = [
+        os.path.join(CHECKOUT_HISTORY_DIR, "checkouts_today.json"),
+        os.path.join(CHECKOUT_HISTORY_DIR, "check_out_history.json"),
+        os.path.join(CHECKOUT_HISTORY_DIR, "checkout_history.json"),
+        os.path.join(DATABASE_DIR, "checkout_history.json"),
+        os.path.join(DATABASE_DIR, "check_out_history.json"),
+        os.path.join(BASE_DIR, "check_out_history.json"),
+        os.path.join(BASE_DIR, "checkout_history.json"),
+        os.path.join(DATABASE_DIR, "CHECK OUT HISTORY", "check_out_history.json"),
+        os.path.join(DATABASE_DIR, "CHECK OUT HISTORY", "checkout_history.json"),
+        os.path.join(DATABASE_DIR, "CHECKOUT HISTORY", "check_out_history.json"),
+        os.path.join(DATABASE_DIR, "CHECKOUT HISTORY", "checkout_history.json")
+    ]
+    co_records = []
+    for src in legacy_checkouts:
+        if os.path.exists(src):
+            try:
+                with open(src, "r", encoding="utf-8") as f:
+                    src_data = json.load(f)
+                if isinstance(src_data, list):
+                    for item in src_data:
+                        if isinstance(item, dict):
+                            if "property" not in item:
+                                item["property"] = DEFAULT_PROPERTY
+                            co_records.append(item)
+                elif isinstance(src_data, dict) and "records" in src_data:
+                    for item in src_data["records"]:
+                        if isinstance(item, dict):
+                            if "property" not in item:
+                                item["property"] = DEFAULT_PROPERTY
+                            co_records.append(item)
+                if os.path.abspath(src) != os.path.abspath(CHECKOUTS_TODAY_JSON) and os.path.exists(src):
+                    try:
+                        os.remove(src)
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[FileManager] Error consolidating checkout from {src}: {e}")
+
+    co_payload = {
+        "property": DEFAULT_PROPERTY,
+        "last_updated": datetime.now().isoformat(),
+        "total_records": len(co_records),
+        "records": co_records
+    }
+    save_and_archive_json(co_payload, "checkouts_today.json", subfolder="check out history")
+    save_and_archive_json(co_records, "check_out_history.json", subfolder="check out history")
+
+    # 4. room_moves_yesterday.json strictly inside database/room moves/
+    legacy_room_moves = [
+        os.path.join(ROOM_MOVES_DIR, "room_moves_yesterday.json"),
+        os.path.join(ROOM_MOVES_DIR, "room_moves_history.json"),
+        os.path.join(ROOM_MOVES_DIR, "room_moves.json"),
+        os.path.join(DATABASE_DIR, "room_moves_history.json"),
+        os.path.join(DATABASE_DIR, "room_moves.json"),
+        os.path.join(BASE_DIR, "room_moves_history.json"),
+        os.path.join(BASE_DIR, "room_moves.json"),
+        os.path.join(DATABASE_DIR, "ROOM MOVES", "room_moves_history.json"),
+        os.path.join(DATABASE_DIR, "ROOM MOVES", "room_moves.json")
+    ]
+    rm_records = []
+    for src in legacy_room_moves:
+        if os.path.exists(src):
+            try:
+                with open(src, "r", encoding="utf-8") as f:
+                    src_data = json.load(f)
+                if isinstance(src_data, list):
+                    rm_records.extend(src_data)
+                elif isinstance(src_data, dict) and "moves" in src_data:
+                    rm_records.extend(src_data["moves"])
+                if os.path.abspath(src) != os.path.abspath(ROOM_MOVES_YESTERDAY_JSON) and os.path.exists(src):
+                    try:
+                        os.remove(src)
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[FileManager] Error consolidating room moves from {src}: {e}")
+
+    save_and_archive_json(rm_records, "room_moves_yesterday.json", subfolder="room moves")
+    save_and_archive_json(rm_records, "room_moves_history.json", subfolder="room moves")
+
+    # 5. Route today's booking calls JSON to database/booking calls for today/
     legacy_today_locations = [
         os.path.join(BASE_DIR, "booking calls for today", "booking_calls_today.json"),
         os.path.join(BASE_DIR, "booking_calls_today.json"),
@@ -200,7 +488,7 @@ def ensure_workspace_directories():
         os.path.join(DATABASE_DIR, "BOOKING CALLS FOR TODAY", "booking_calls_today.json")
     ]
     for loc in legacy_today_locations:
-        if os.path.exists(loc) and os.path.abspath(loc) != os.path.abspath(BOOKING_CALLS_TODAY_JSON):
+        if os.path.exists(loc) and os.path.abspath(loc).lower() != os.path.abspath(BOOKING_CALLS_TODAY_JSON).lower():
             try:
                 if not os.path.exists(BOOKING_CALLS_TODAY_JSON):
                     shutil.move(loc, BOOKING_CALLS_TODAY_JSON)
@@ -209,63 +497,139 @@ def ensure_workspace_directories():
             except Exception:
                 pass
 
-    # Clean up empty legacy folder in root if present
-    root_legacy_fold = os.path.join(BASE_DIR, "booking calls for today")
-    if os.path.exists(root_legacy_fold) and os.path.abspath(root_legacy_fold).lower() != os.path.abspath(BOOKING_CALLS_TODAY_DIR).lower():
+    misplaced_bcom_state = [
+        os.path.join(BASE_DIR, "booking_calls_state.json"),
+        os.path.join(DATABASE_DIR, "booking_calls_state.json"),
+        os.path.join(BOOKING_CALLS_DIR, "booking_calls_state.json"),
+        os.path.join(DATABASE_DIR, "BOOKING CALLS FOR TODAY", "booking_calls_state.json")
+    ]
+    for loc in misplaced_bcom_state:
+        if os.path.exists(loc) and os.path.abspath(loc).lower() != os.path.abspath(BOOKING_CALLS_STATE_PATH).lower():
+            try:
+                if not os.path.exists(BOOKING_CALLS_STATE_PATH):
+                    shutil.move(loc, BOOKING_CALLS_STATE_PATH)
+                else:
+                    os.remove(loc)
+            except Exception:
+                pass
+
+    if os.path.exists(BOOKING_CALLS_STATE_PATH):
         try:
-            if os.path.isdir(root_legacy_fold) and not os.listdir(root_legacy_fold):
-                os.rmdir(root_legacy_fold)
+            with open(BOOKING_CALLS_STATE_PATH, "r", encoding="utf-8") as f:
+                bcs_data = json.load(f)
+            if not isinstance(bcs_data, dict):
+                save_and_archive_json({}, "booking_calls_state.json", subfolder="booking calls for today")
+        except Exception:
+            save_and_archive_json({}, "booking_calls_state.json", subfolder="booking calls for today")
+    else:
+        save_and_archive_json({}, "booking_calls_state.json", subfolder="booking calls for today")
+
+    if os.path.exists(BOOKING_CALLS_TODAY_JSON):
+        try:
+            with open(BOOKING_CALLS_TODAY_JSON, "r", encoding="utf-8") as f:
+                bct_data = json.load(f)
+            if not isinstance(bct_data, list):
+                save_and_archive_json([], "booking_calls_today.json", subfolder="booking calls for today")
+        except Exception:
+            save_and_archive_json([], "booking_calls_today.json", subfolder="booking calls for today")
+    else:
+        save_and_archive_json([], "booking_calls_today.json", subfolder="booking calls for today")
+
+    # 6. Route Sandy Beach arrivals & departures
+    misplaced_beach = [
+        os.path.join(BASE_DIR, "arrivals_sandy_beach.json"),
+        os.path.join(BASE_DIR, "arrivals.json"),
+        os.path.join(DATABASE_DIR, "arrivals_sandy_beach.json"),
+        os.path.join(DATABASE_DIR, "SANDY BEACH ARRIVALS", "arrivals_sandy_beach.json"),
+        os.path.join(SANDY_BEACH_DIR, "arrivals.json"),
+        os.path.join(SANDY_BEACH_ARRIVALS_DIR, "arrivals.json"),
+        os.path.join(SANDY_BEACH_ARRIVALS_DIR, "arrivals_sandy_beach.json")
+    ]
+    beach_data = {}
+    for p in misplaced_beach:
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                if isinstance(d, dict) and not beach_data:
+                    beach_data = d
+            except Exception:
+                pass
+    if os.path.exists(ARRIVALS_BEACH_PATH):
+        try:
+            with open(ARRIVALS_BEACH_PATH, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if isinstance(d, dict) and d:
+                beach_data = d
         except Exception:
             pass
 
-    # Ensure BOOKING_CALLS_TODAY_DIR exists inside database directory
-    os.makedirs(BOOKING_CALLS_TODAY_DIR, exist_ok=True)
+    save_and_archive_json(beach_data, "arrivals_today.json", subfolder="sandy beach/arrivals")
+    save_and_archive_json(beach_data, "arrivals.json", subfolder="sandy beach/arrivals")
 
-    # 5. Route Sandy Beach arrivals JSON to DATABASE/SANDY BEACH/
-    misplaced_beach = [
-        os.path.join(BASE_DIR, "arrivals_sandy_beach.json"),
-        os.path.join(DATABASE_DIR, "arrivals_sandy_beach.json")
-    ]
-    for p in misplaced_beach:
-        if os.path.exists(p) and os.path.abspath(p) != os.path.abspath(ARRIVALS_BEACH_PATH):
-            try:
-                if not os.path.exists(ARRIVALS_BEACH_PATH):
-                    shutil.move(p, ARRIVALS_BEACH_PATH)
-                else:
-                    os.remove(p)
-            except Exception:
-                pass
+    # Initialize Sandy Beach departures_today.json if missing
+    if not os.path.exists(DEPARTURES_BEACH_PATH):
+        dep_init = {
+            "property": "sandy_beach",
+            "date": date.today().strftime("%Y-%m-%d"),
+            "total_departures": 0,
+            "departures": []
+        }
+        save_and_archive_json(dep_init, "departures_today.json", subfolder="sandy beach/departures")
 
-    # 6. Route Sandy Villas arrivals JSON to DATABASE/SANDY VILLAS/
+    # 7. Route Sandy Villas arrivals & departures
     misplaced_villas = [
         os.path.join(BASE_DIR, "arrivals_sandy_villas.json"),
-        os.path.join(DATABASE_DIR, "arrivals_sandy_villas.json")
+        os.path.join(DATABASE_DIR, "arrivals_sandy_villas.json"),
+        os.path.join(DATABASE_DIR, "SANDY VILLAS ARRIVALS", "arrivals_sandy_villas.json"),
+        os.path.join(SANDY_VILLAS_DIR, "arrivals.json"),
+        os.path.join(SANDY_VILLAS_ARRIVALS_DIR, "arrivals.json"),
+        os.path.join(SANDY_VILLAS_ARRIVALS_DIR, "arrivals_sandy_villas.json")
     ]
+    villas_data = {}
     for p in misplaced_villas:
-        if os.path.exists(p) and os.path.abspath(p) != os.path.abspath(ARRIVALS_VILLAS_PATH):
+        if os.path.exists(p):
             try:
-                if not os.path.exists(ARRIVALS_VILLAS_PATH):
-                    shutil.move(p, ARRIVALS_VILLAS_PATH)
-                else:
-                    os.remove(p)
+                with open(p, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                if isinstance(d, dict) and not villas_data:
+                    villas_data = d
             except Exception:
                 pass
+    if os.path.exists(ARRIVALS_VILLAS_PATH):
+        try:
+            with open(ARRIVALS_VILLAS_PATH, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if isinstance(d, dict) and d:
+                villas_data = d
+        except Exception:
+            pass
 
-    # 7. Route Booking.com calls state JSON to BOOKING CALLS/
-    misplaced_bcom = [
-        os.path.join(BASE_DIR, "booking_calls_state.json"),
-        os.path.join(DATABASE_DIR, "booking_calls_state.json")
-    ]
-    booking_calls_state_target = os.path.join(BOOKING_CALLS_DIR, "booking_calls_state.json")
-    for p in misplaced_bcom:
-        if os.path.exists(p) and os.path.abspath(p) != os.path.abspath(booking_calls_state_target):
-            try:
-                if not os.path.exists(booking_calls_state_target):
-                    shutil.move(p, booking_calls_state_target)
-                else:
-                    os.remove(p)
-            except Exception:
-                pass
+    save_and_archive_json(villas_data, "arrivals_today.json", subfolder="sandy villas/arrivals")
+    save_and_archive_json(villas_data, "arrivals.json", subfolder="sandy villas/arrivals")
+
+    # Initialize Sandy Villas departures_today.json if missing
+    if not os.path.exists(DEPARTURES_VILLAS_PATH):
+        villas_dep_init = {
+            "property": "sandy_villas",
+            "date": date.today().strftime("%Y-%m-%d"),
+            "total_departures": 0,
+            "departures": []
+        }
+        save_and_archive_json(villas_dep_init, "departures_today.json", subfolder="sandy villas/departures")
+
+    # 8. Strictly enforce that only master_state.json and state_metadata.json reside in database/ root
+    for item in os.listdir(DATABASE_DIR):
+        item_path = os.path.join(DATABASE_DIR, item)
+        if os.path.isfile(item_path) and item.endswith(".json"):
+            if item not in {"master_state.json", "state_metadata.json"}:
+                try:
+                    with open(item_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    save_and_archive_json(data, item)  # automatically routes to designated subfolder
+                    os.remove(item_path)
+                except Exception:
+                    pass
 
 
 def cleanup_obsolete_python_files(workspace_dir: str = BASE_DIR) -> List[str]:
@@ -292,9 +656,8 @@ def cleanup_obsolete_python_files(workspace_dir: str = BASE_DIR) -> List[str]:
     return deleted_files
 
 
-# Run autonomous directory verification and cleanup on module import
-ensure_workspace_directories()
-cleanup_obsolete_python_files()
+# Guard flag: ensure workspace setup only runs once per process
+_workspace_initialized = False
 
 
 class InHouseDataManager:
@@ -312,7 +675,10 @@ class InHouseDataManager:
                  state_meta_path: str = STATE_META_PATH,
                  arrivals_state_path: str = ARRIVALS_STATE_PATH,
                  trash_dir: str = TRASH_DIR):
-        ensure_workspace_directories()
+        global _workspace_initialized
+        if not _workspace_initialized:
+            ensure_workspace_directories()
+            _workspace_initialized = True
         self.master_state_path = os.path.abspath(master_state_path)
         self.state_meta_path = os.path.abspath(state_meta_path)
         self.arrivals_state_path = os.path.abspath(arrivals_state_path)
@@ -322,65 +688,81 @@ class InHouseDataManager:
     # In-House State Persistence (master_state.json inside DATABASE/ directory)
     # -------------------------------------------------------------------------
     def load_master_state(self) -> Dict[str, Dict[str, Any]]:
-        """Loads master_state.json from DATABASE/ directory."""
-        if not os.path.exists(self.master_state_path):
-            # Check root location as fallback migration
-            legacy = os.path.join(BASE_DIR, "master_state.json")
-            if os.path.exists(legacy):
-                shutil.move(legacy, self.master_state_path)
-            else:
+        """Loads master_state.json from DATABASE/DATABASE/ or DATABASE/ directory."""
+        if self.master_state_path not in [os.path.abspath(MASTER_STATE_PATH), os.path.abspath(MASTER_STATE_ROOT_PATH)]:
+            if not os.path.exists(self.master_state_path):
                 return {}
+            target = self.master_state_path
+        else:
+            candidates = [
+                self.master_state_path,
+                MASTER_STATE_PATH,
+                MASTER_STATE_ROOT_PATH,
+                os.path.join(BASE_DIR, "master_state.json")
+            ]
+            target = None
+            for c in candidates:
+                if os.path.exists(c):
+                    target = c
+                    break
+        if not target or not os.path.exists(target):
+            return {}
 
         try:
-            with open(self.master_state_path, "r", encoding="utf-8") as f:
+            with open(target, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if not isinstance(data, dict):
                     return {}
-                return {k: v for k, v in data.items() if not k.startswith("_")}
+                return {k: v for k, v in data.items() if not k.startswith("_") and isinstance(v, dict)}
         except Exception as e:
             print(f"[InHouseDataManager] Error loading master state: {e}")
             return {}
 
     def save_master_state(self, state: Dict[str, Dict[str, Any]]):
-        """Atomically saves the active in-house guests to master_state.json inside DATABASE/."""
-        temp_path = self.master_state_path + ".tmp"
-        try:
-            with open(temp_path, "w", encoding="utf-8") as f:
-                json.dump(state, f, ensure_ascii=False, indent=2)
-            if os.path.exists(self.master_state_path):
-                os.replace(temp_path, self.master_state_path)
-            else:
-                os.rename(temp_path, self.master_state_path)
-        except Exception as e:
-            if os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except Exception:
-                    pass
-            raise e
+        """Atomically saves the active in-house guests to master_state.json inside DATABASE/DATABASE/ and mirrors to DATABASE/."""
+        if self.master_state_path in [os.path.abspath(MASTER_STATE_PATH), os.path.abspath(MASTER_STATE_ROOT_PATH)]:
+            save_and_archive_json(state, "master_state.json", subfolder="database")
+            save_and_archive_json(state, "master_state.json", subfolder=None)
+        else:
+            save_and_archive_json(state, self.master_state_path)
 
     def load_metadata(self) -> Dict[str, Any]:
-        """Loads state metadata (last_processed_date, timestamps, etc.) from DATABASE/."""
-        if not os.path.exists(self.state_meta_path):
-            legacy = os.path.join(BASE_DIR, "state_metadata.json")
-            if os.path.exists(legacy):
-                shutil.move(legacy, self.state_meta_path)
+        """Loads state metadata (last_processed_date, timestamps, etc.) from DATABASE/DATABASE/ or DATABASE/."""
+        if self.state_meta_path not in [os.path.abspath(STATE_META_PATH), os.path.abspath(STATE_META_ROOT_PATH)]:
+            if not os.path.exists(self.state_meta_path):
+                return {}
+            target = self.state_meta_path
+        else:
+            candidates = [
+                self.state_meta_path,
+                STATE_META_PATH,
+                STATE_META_ROOT_PATH,
+                os.path.join(BASE_DIR, "state_metadata.json")
+            ]
+            target = None
+            for c in candidates:
+                if os.path.exists(c):
+                    target = c
+                    break
+        if not target or not os.path.exists(target):
+            return {}
 
-        if os.path.exists(self.state_meta_path):
-            try:
-                with open(self.state_meta_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception:
-                pass
+        try:
+            with open(target, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+        except Exception:
+            pass
         return {}
 
     def save_metadata(self, meta: Dict[str, Any]):
-        """Persists state metadata to DATABASE/."""
-        try:
-            with open(self.state_meta_path, "w", encoding="utf-8") as f:
-                json.dump(meta, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"[InHouseDataManager] Error saving metadata: {e}")
+        """Persists state metadata to DATABASE/DATABASE/ and mirrors to DATABASE/."""
+        if self.state_meta_path in [os.path.abspath(STATE_META_PATH), os.path.abspath(STATE_META_ROOT_PATH)]:
+            save_and_archive_json(meta, "state_metadata.json", subfolder="database")
+            save_and_archive_json(meta, "state_metadata.json", subfolder=None)
+        else:
+            save_and_archive_json(meta, self.state_meta_path)
 
     def get_last_processed_date(self) -> Optional[date]:
         """Returns the date of the last ingested in-house CSV, or None if brand new."""
@@ -401,80 +783,159 @@ class InHouseDataManager:
         self.save_metadata(meta)
 
     # -------------------------------------------------------------------------
-    # Arrivals State Persistence (Automated Routing to Designated Folders)
+    # Arrivals & Departures State Persistence (Automated Routing to Designated Folders)
     # -------------------------------------------------------------------------
     def load_arrivals_state(self) -> Dict[str, Any]:
-        """Loads arrivals_state.json and property-specific arrivals."""
-        if not os.path.exists(self.arrivals_state_path):
-            # Check property folders
-            data: Dict[str, Any] = {"_metadata": {}, "SANDY BEACH": {}, "SANDY VILLAS": {}}
-            if os.path.exists(ARRIVALS_BEACH_PATH):
+        """Loads arrivals state from designated property folders (arrivals_today.json)."""
+        beach_data = {}
+        beach_candidates = [
+            ARRIVALS_BEACH_PATH,
+            os.path.join(SANDY_BEACH_ARRIVALS_DIR, "arrivals.json"),
+            os.path.join(SANDY_BEACH_ARRIVALS_DIR, "arrivals_sandy_beach.json"),
+            os.path.join(SANDY_BEACH_DIR, "arrivals.json"),
+            os.path.join(DATABASE_DIR, "arrivals_sandy_beach.json")
+        ]
+        for p in beach_candidates:
+            if os.path.exists(p):
                 try:
-                    with open(ARRIVALS_BEACH_PATH, "r", encoding="utf-8") as f:
-                        data["SANDY BEACH"] = json.load(f)
+                    with open(p, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    if isinstance(data, dict):
+                        beach_data = data
+                        break
                 except Exception:
                     pass
-            if os.path.exists(ARRIVALS_VILLAS_PATH):
-                try:
-                    with open(ARRIVALS_VILLAS_PATH, "r", encoding="utf-8") as f:
-                        data["SANDY VILLAS"] = json.load(f)
-                except Exception:
-                    pass
-            return data
 
-        try:
-            with open(self.arrivals_state_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if not isinstance(data, dict):
-                    return {"_metadata": {}, "SANDY BEACH": {}, "SANDY VILLAS": {}}
-                if "SANDY BEACH" not in data:
-                    data["SANDY BEACH"] = {}
-                if "SANDY VILLAS" not in data:
-                    data["SANDY VILLAS"] = {}
-                return data
-        except Exception as e:
-            print(f"[InHouseDataManager] Error loading arrivals state: {e}")
-            return {"_metadata": {}, "SANDY BEACH": {}, "SANDY VILLAS": {}}
+        villas_data = {}
+        villas_candidates = [
+            ARRIVALS_VILLAS_PATH,
+            os.path.join(SANDY_VILLAS_ARRIVALS_DIR, "arrivals.json"),
+            os.path.join(SANDY_VILLAS_ARRIVALS_DIR, "arrivals_sandy_villas.json"),
+            os.path.join(SANDY_VILLAS_DIR, "arrivals.json"),
+            os.path.join(DATABASE_DIR, "arrivals_sandy_villas.json")
+        ]
+        for p in villas_candidates:
+            if os.path.exists(p):
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    if isinstance(data, dict):
+                        villas_data = data
+                        break
+                except Exception:
+                    pass
+
+        # If custom arrivals_state_path passed and exists (e.g. in test), load it
+        if os.path.exists(self.arrivals_state_path) and os.path.basename(self.arrivals_state_path) not in ["arrivals.json", "arrivals_today.json"]:
+            try:
+                with open(self.arrivals_state_path, "r", encoding="utf-8") as f:
+                    custom_data = json.load(f)
+                    if isinstance(custom_data, dict):
+                        if "SANDY BEACH" in custom_data:
+                            beach_data = custom_data["SANDY BEACH"]
+                        if "SANDY VILLAS" in custom_data:
+                            villas_data = custom_data["SANDY VILLAS"]
+            except Exception:
+                pass
+
+        return {
+            "_metadata": {
+                "last_updated": datetime.now().isoformat(),
+                "total_beach": len(beach_data),
+                "total_villas": len(villas_data)
+            },
+            "SANDY BEACH": beach_data,
+            "SANDY VILLAS": villas_data
+        }
 
     def save_arrivals_state(self, arrivals_data: Dict[str, Any]):
         """
         Autonomously routes arrivals into designated folders:
-          - Sandy Beach arrivals -> DATABASE/SANDY BEACH/arrivals_sandy_beach.json
-          - Sandy Villas arrivals -> DATABASE/SANDY VILLAS/arrivals_sandy_villas.json
-          - Unified arrivals state -> DATABASE/arrivals_state.json
+          - Sandy Beach arrivals -> database/sandy beach/arrivals/arrivals_today.json
+                                 &  database/sandy beach/arrivals/arrivals.json
+          - Sandy Villas arrivals -> database/sandy villas/arrivals/arrivals_today.json
+                                 &  database/sandy villas/arrivals/arrivals.json
         """
         ensure_workspace_directories()
 
-        # Save unified state
-        temp_path = self.arrivals_state_path + ".tmp"
-        try:
-            with open(temp_path, "w", encoding="utf-8") as f:
-                json.dump(arrivals_data, f, ensure_ascii=False, indent=2)
-            if os.path.exists(self.arrivals_state_path):
-                os.replace(temp_path, self.arrivals_state_path)
-            else:
-                os.rename(temp_path, self.arrivals_state_path)
-        except Exception as e:
-            if os.path.exists(temp_path):
+        beach_data = arrivals_data.get("SANDY BEACH", {})
+        save_and_archive_json(beach_data, "arrivals_today.json", subfolder="sandy beach/arrivals")
+        save_and_archive_json(beach_data, "arrivals.json", subfolder="sandy beach/arrivals")
+        save_and_archive_json(beach_data, "arrivals_sandy_beach.json", subfolder="sandy beach/arrivals")
+
+        villas_data = arrivals_data.get("SANDY VILLAS", {})
+        save_and_archive_json(villas_data, "arrivals_today.json", subfolder="sandy villas/arrivals")
+        save_and_archive_json(villas_data, "arrivals.json", subfolder="sandy villas/arrivals")
+        save_and_archive_json(villas_data, "arrivals_sandy_villas.json", subfolder="sandy villas/arrivals")
+
+        # If custom arrivals_state_path was passed in constructor, also persist to it
+        if os.path.basename(self.arrivals_state_path) not in ["arrivals.json", "arrivals_today.json"]:
+            save_and_archive_json(arrivals_data, self.arrivals_state_path)
+
+    def load_departures_state(self, property_name: str = DEFAULT_PROPERTY) -> Dict[str, Any]:
+        """Loads departures state from database/<property>/departures/departures_today.json."""
+        target_path = get_property_departures_path(property_name)
+        if os.path.exists(target_path):
+            try:
+                with open(target_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        return data
+            except Exception:
+                pass
+        return {
+            "property": property_name,
+            "date": date.today().strftime("%Y-%m-%d"),
+            "total_departures": 0,
+            "departures": []
+        }
+
+    def save_departures_state(self, departures_data: Dict[str, Any], property_name: str = DEFAULT_PROPERTY):
+        """Saves departures state into database/<property>/departures/departures_today.json."""
+        norm_prop = property_name.lower().replace("_", " ")
+        subfolder = f"{norm_prop}/departures"
+        save_and_archive_json(departures_data, "departures_today.json", subfolder=subfolder)
+
+    def load_checkouts_history(self) -> Dict[str, Any]:
+        """Loads checkout history from database/check out history/checkouts_today.json."""
+        for p in [CHECKOUTS_TODAY_JSON, os.path.join(CHECKOUT_HISTORY_DIR, "check_out_history.json")]:
+            if os.path.exists(p):
                 try:
-                    os.remove(temp_path)
+                    with open(p, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        if isinstance(data, dict) and "records" in data:
+                            return data
+                        elif isinstance(data, list):
+                            return {
+                                "property": DEFAULT_PROPERTY,
+                                "last_updated": datetime.now().isoformat(),
+                                "total_records": len(data),
+                                "records": data
+                            }
                 except Exception:
                     pass
-            raise e
+        return {
+            "property": DEFAULT_PROPERTY,
+            "last_updated": None,
+            "total_records": 0,
+            "records": []
+        }
 
-        # Route Sandy Beach arrivals to DATABASE/SANDY BEACH/
-        try:
-            with open(ARRIVALS_BEACH_PATH, "w", encoding="utf-8") as f:
-                json.dump(arrivals_data.get("SANDY BEACH", {}), f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"[InHouseDataManager] Error saving Sandy Beach arrivals: {e}")
+    def load_room_moves_history(self) -> List[Dict[str, Any]]:
+        """Loads room moves from database/room moves/room_moves_yesterday.json."""
+        for p in [ROOM_MOVES_YESTERDAY_JSON, os.path.join(ROOM_MOVES_DIR, "room_moves_history.json")]:
+            if os.path.exists(p):
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        if isinstance(data, list):
+                            return data
+                        elif isinstance(data, dict) and "moves" in data:
+                            return data["moves"]
+                except Exception:
+                    pass
+        return []
 
-        # Route Sandy Villas arrivals to DATABASE/SANDY VILLAS/
-        try:
-            with open(ARRIVALS_VILLAS_PATH, "w", encoding="utf-8") as f:
-                json.dump(arrivals_data.get("SANDY VILLAS", {}), f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"[InHouseDataManager] Error saving Sandy Villas arrivals: {e}")
 
     # -------------------------------------------------------------------------
     # Gatekeeper Missing Dates Calculation
@@ -861,9 +1322,25 @@ class InHouseDataManager:
         self.save_master_state(new_bookings)
         self.set_last_processed_date(processing_date)
 
-        # 4. Record Check-outs to History
+        # 4. Record Check-outs to History & Departures Today
         if check_outs:
             self._archive_checkouts(check_outs)
+            dep_payload = {
+                "property": DEFAULT_PROPERTY,
+                "date": date_str,
+                "total_departures": len(check_outs),
+                "departures": [
+                    {
+                        "booking_id": co.get("booking_id"),
+                        "guests": co.get("guests", []),
+                        "room": co.get("room", ""),
+                        "departure": co.get("departure", ""),
+                        "checkout_date": co.get("checkout_date", date_str)
+                    }
+                    for co in check_outs
+                ]
+            }
+            self.save_departures_state(dep_payload, property_name=DEFAULT_PROPERTY)
 
         # 5. Record Room Moves to Log & History
         if room_moves:
@@ -883,19 +1360,21 @@ class InHouseDataManager:
     # Audit & History Logging
     # -------------------------------------------------------------------------
     def _archive_checkouts(self, checkouts: List[Dict[str, Any]]):
-        history = []
-        if os.path.exists(CHECKOUT_HISTORY_PATH):
-            try:
-                with open(CHECKOUT_HISTORY_PATH, "r", encoding="utf-8") as f:
-                    history = json.load(f)
-                    if not isinstance(history, list):
-                        history = []
-            except Exception:
-                history = []
-        history.extend(checkouts)
+        existing = self.load_checkouts_history()
+        records = existing.get("records", [])
+        for co in checkouts:
+            if "property" not in co:
+                co["property"] = DEFAULT_PROPERTY
+        records.extend(checkouts)
+        payload = {
+            "property": DEFAULT_PROPERTY,
+            "last_updated": datetime.now().isoformat(),
+            "total_records": len(records),
+            "records": records
+        }
         try:
-            with open(CHECKOUT_HISTORY_PATH, "w", encoding="utf-8") as f:
-                json.dump(history, f, ensure_ascii=False, indent=2)
+            save_and_archive_json(payload, "checkouts_today.json", subfolder="check out history")
+            save_and_archive_json(records, "check_out_history.json", subfolder="check out history")
         except Exception as e:
             print(f"[InHouseDataManager] Error archiving checkouts: {e}")
 
@@ -914,19 +1393,11 @@ class InHouseDataManager:
         except Exception as e:
             print(f"[InHouseDataManager] Error writing room moves log: {e}")
 
-        history = []
-        if os.path.exists(ROOM_MOVES_HISTORY_PATH):
-            try:
-                with open(ROOM_MOVES_HISTORY_PATH, "r", encoding="utf-8") as f:
-                    history = json.load(f)
-                    if not isinstance(history, list):
-                        history = []
-            except Exception:
-                history = []
+        history = self.load_room_moves_history()
         history.extend(room_moves)
         try:
-            with open(ROOM_MOVES_HISTORY_PATH, "w", encoding="utf-8") as f:
-                json.dump(history, f, ensure_ascii=False, indent=2)
+            save_and_archive_json(history, "room_moves_yesterday.json", subfolder="room moves")
+            save_and_archive_json(history, "room_moves_history.json", subfolder="room moves")
         except Exception as e:
             print(f"[InHouseDataManager] Error writing room moves history JSON: {e}")
 
@@ -1181,21 +1652,14 @@ class GatekeeperDialog(QDialog):
 
         inhouse_layout.addWidget(self.step_card)
 
-        lbl_table_header = QLabel("Detected Room Moves & Activity Audit:")
-        lbl_table_header.setStyleSheet("font-weight: bold; color: #333333; margin-top: 2px;")
-        inhouse_layout.addWidget(lbl_table_header)
-
-        self.table_moves = QTableWidget(0, 5)
-        self.table_moves.setHorizontalHeaderLabels([
-            "Date", "Booking ID", "Guest(s)", "Previous Room", "New Room"
-        ])
-        self.table_moves.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.table_moves.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.table_moves.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.table_moves.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.table_moves.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self.table_moves.setAlternatingRowColors(True)
-        inhouse_layout.addWidget(self.table_moves)
+        lbl_info_note = QLabel(
+            "ℹ️ All state data, room moves, and checkouts are archived into DATABASE/ "
+            "and are accessible in the 'System Data & JSON Records' panel."
+        )
+        lbl_info_note.setStyleSheet("color: #555555; font-size: 12px; font-style: italic; padding: 8px;")
+        lbl_info_note.setWordWrap(True)
+        inhouse_layout.addWidget(lbl_info_note)
+        inhouse_layout.addStretch()
 
         self.tabs.addTab(tab_inhouse, "1. In-House Synchronization")
 
@@ -1360,30 +1824,6 @@ class GatekeeperDialog(QDialog):
 
             for rm in summary["room_moves"]:
                 self.all_detected_room_moves.append(rm)
-                row_pos = self.table_moves.rowCount()
-                self.table_moves.insertRow(row_pos)
-
-                date_item = QTableWidgetItem(rm["date"])
-                date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.table_moves.setItem(row_pos, 0, date_item)
-
-                bk_item = QTableWidgetItem(str(rm["booking_id"]))
-                bk_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.table_moves.setItem(row_pos, 1, bk_item)
-
-                guests_text = ", ".join(rm.get("guests", []))
-                self.table_moves.setItem(row_pos, 2, QTableWidgetItem(guests_text))
-
-                old_room_item = QTableWidgetItem(rm["old_room"])
-                old_room_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                old_room_item.setForeground(QColor("#C0392B"))
-                self.table_moves.setItem(row_pos, 3, old_room_item)
-
-                new_room_item = QTableWidgetItem(rm["new_room"])
-                new_room_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                new_room_item.setForeground(QColor("#27AE60"))
-                new_room_item.setFont(QFont("Segoe UI", weight=QFont.Weight.Bold))
-                self.table_moves.setItem(row_pos, 4, new_room_item)
 
             moves_count = len(summary["room_moves"])
             in_count = len(summary["check_ins"])

@@ -20,8 +20,10 @@ Thumbs.db
 Desktop.ini
 .DS_Store
 
-# Logs
+# Logs and temporary files
 *.log
+*.tmp
+.*.tmp
 
 # Sensitive Guest Data & Runtime Storage (NO JSONs, NO CSVs)
 *.json
@@ -34,27 +36,22 @@ Desktop.ini
 !TEMPLATES/**
 
 # Prevent tracking runtime generated outputs while preserving directory structure
-DATABASE/*
+DATABASE/**
 !DATABASE/**/
 !DATABASE/**/.gitkeep
 
-BOOKING CALLS/*
+BOOKING CALLS/**
 !BOOKING CALLS/**/
 !BOOKING CALLS/**/.gitkeep
 
-TRASH/*
+TRASH/**
 !TRASH/**/
 !TRASH/**/.gitkeep
 
-OUTPUT/*
+OUTPUT/**
 !OUTPUT/**/
 !OUTPUT/**/.gitkeep
-OUTPUT/OFFERS/*
-!OUTPUT/OFFERS/**/
-!OUTPUT/OFFERS/**/.gitkeep
-OUTPUT/TODAYS_LIST/*
-!OUTPUT/TODAYS_LIST/**/
-!OUTPUT/TODAYS_LIST/**/.gitkeep
 
 # Whitelist all .gitkeep markers
 !**/.gitkeep
+
