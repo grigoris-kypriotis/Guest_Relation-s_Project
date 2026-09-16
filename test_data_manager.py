@@ -22,12 +22,16 @@ class TestInHouseDataManager(unittest.TestCase):
         self.state_meta_path = os.path.join(self.test_dir, "state_meta.json")
         self.arrivals_state_path = os.path.join(self.test_dir, "arrivals_state.json")
         self.trash_dir = os.path.join(self.test_dir, "TRASH")
+        self.checkouts_path = os.path.join(self.test_dir, "checkouts.json")
+        self.room_moves_path = os.path.join(self.test_dir, "room_moves.json")
 
         self.dm = InHouseDataManager(
             master_state_path=self.master_state_path,
             state_meta_path=self.state_meta_path,
             arrivals_state_path=self.arrivals_state_path,
-            trash_dir=self.trash_dir
+            trash_dir=self.trash_dir,
+            checkouts_path=self.checkouts_path,
+            room_moves_path=self.room_moves_path
         )
 
     def tearDown(self):

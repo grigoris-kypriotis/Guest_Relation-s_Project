@@ -371,13 +371,17 @@ class InHouseDataManager:
         master_state_path: str = MASTER_STATE_PATH,
         state_meta_path: str = STATE_META_PATH,
         arrivals_state_path: str = ARRIVALS_BEACH_PATH,
-        trash_dir: str = TRASH_DIR
+        trash_dir: str = TRASH_DIR,
+        checkouts_path: str = CHECKOUTS_JSON,
+        room_moves_path: str = ROOM_MOVES_JSON
     ):
         ensure_workspace_directories()
         self.master_state_path = os.path.abspath(master_state_path)
         self.state_meta_path = os.path.abspath(state_meta_path)
         self.arrivals_state_path = os.path.abspath(arrivals_state_path)
         self.trash_dir = os.path.abspath(trash_dir)
+        self.checkouts_path = os.path.abspath(checkouts_path)
+        self.room_moves_path = os.path.abspath(room_moves_path)
 
     # -------------------------------------------------------------------------
     # In-House State Persistence (HOTEL STATE/master_state.json)
@@ -508,7 +512,7 @@ class InHouseDataManager:
 
     def load_checkouts_history(self) -> Dict[str, Any]:
         """Loads checkout records from DATABASE/CHECK OUT HISTORY/checkouts.json."""
-        target = CHECKOUTS_JSON
+        target = self.checkouts_path
         records = []
         if os.path.exists(target):
             try:
@@ -530,7 +534,7 @@ class InHouseDataManager:
 
     def load_room_moves_history(self) -> List[Dict[str, Any]]:
         """Loads room moves from DATABASE/ROOM MOVES/room_moves.json."""
-        target = ROOM_MOVES_JSON
+        target = self.room_moves_path
         if os.path.exists(target):
             try:
                 with open(target, "r", encoding="utf-8") as f:
@@ -967,7 +971,7 @@ class InHouseDataManager:
             "records": records
         }
         try:
-            save_and_archive_json(payload, CHECKOUTS_JSON)
+            save_and_archive_json(payload, self.checkouts_path)
         except Exception as e:
             print(f"[InHouseDataManager] Error archiving checkouts: {e}")
 
@@ -996,7 +1000,7 @@ class InHouseDataManager:
                 history.append(rm)
 
         try:
-            save_and_archive_json(history, ROOM_MOVES_JSON)
+            save_and_archive_json(history, self.room_moves_path)
         except Exception as e:
             print(f"[InHouseDataManager] Error writing room moves history JSON: {e}")
 
