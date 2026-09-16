@@ -557,7 +557,7 @@ class InHouseDataManager:
         last_date = self.get_last_sync_date()
         master_state = self.load_master_state()
 
-        if last_date is None or not master_state:
+        if last_date is None:
             return [reference_date]
 
         if last_date >= reference_date:
@@ -1280,7 +1280,22 @@ class GatekeeperDialog(QDialog):
         self.lbl_inhouse_file.setText("No file selected — Click Browse to choose CSV")
         self.lbl_inhouse_file.setStyleSheet("color: #7F8C8D; font-style: italic;")
         self.btn_process_inhouse.setEnabled(False)
-        self.btn_continue.setEnabled(False)
+        has_state = bool(self.data_manager.load_master_state())
+        if self.current_step_idx > 0 or has_state:
+            self.btn_continue.setEnabled(True)
+            self.btn_continue.setText("🚀 Access Guest Relations Workspace")
+            self.btn_continue.setStyleSheet("""
+                background-color: #27AE60;
+                color: white;
+                font-weight: bold;
+                padding: 11px 26px;
+                border-radius: 4px;
+                font-size: 14px;
+            """)
+        else:
+            self.btn_continue.setEnabled(False)
+            self.btn_continue.setText("🚀 Access Guest Relations Workspace")
+            self.btn_continue.setStyleSheet("")
 
     def _browse_inhouse_csv(self):
         target_date = self.missing_dates[self.current_step_idx]

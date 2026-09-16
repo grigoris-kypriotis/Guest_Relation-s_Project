@@ -356,6 +356,20 @@ class TestInHouseDataManager(unittest.TestCase):
             self.assertEqual(co_data["property"], "sandy_beach")
             self.assertIn("records", co_data)
 
+    def test_get_missing_dates_with_configured_sync_date(self):
+        # 1. When last_sync_date is None, returns reference_date (today)
+        ref_date = date(2026, 9, 16)
+        self.assertEqual(self.dm.get_missing_dates(reference_date=ref_date), [ref_date])
+
+        # 2. When last_sync_date is configured (e.g. 2026-09-13), returns sequence starting from next day
+        self.dm.save_metadata({"last_sync_date": "2026-09-13", "total_bookings": 0})
+        missing = self.dm.get_missing_dates(reference_date=ref_date)
+        self.assertEqual(missing, [date(2026, 9, 14), date(2026, 9, 15), date(2026, 9, 16)])
+
+        # 3. When last_sync_date >= reference_date, returns empty list
+        self.dm.save_metadata({"last_sync_date": "2026-09-16", "total_bookings": 100})
+        self.assertEqual(self.dm.get_missing_dates(reference_date=ref_date), [])
+
 
 if __name__ == "__main__":
     unittest.main()
