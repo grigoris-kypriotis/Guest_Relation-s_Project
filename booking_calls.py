@@ -8,11 +8,13 @@ Features:
 1. Stay-based Calling Schedule Algorithm (Rule 1, 2, 3, 4) strictly for Booking.com
 2. Synchronization of BOOKING CALLS.xlsx:
    - Sheet 1 (ARRIVALS): Populated exclusively with today's Booking.com arrivals
-   - Follow-Up Sheet (FOLLOW UP 1): Populated with Booking.com rooms scheduled per date
-3. Autonomous Directory & State Management:
-   - Today's calls JSON saved strictly inside 'booking calls for today/booking_calls_today.json'
-   - Master booking calls state saved in 'BOOKING CALLS/booking_calls_state.json'
-4. Interactive PyQt6 CRM interface with editable room card containers and 6 standardized statuses.
+   - Sheet 2 (FOLLOW UP): Populated with Booking.com rooms scheduled per date
+3. Direct Cell Manipulation in Excel:
+   - Status Color Highlighting: Green (#D4EDDA), Yellow (#FFF3CD), Red (#F8D7DA)
+   - Status String Insertion: 'room N/A', 'room N/E', 'room N/W' directly in the same cell
+4. Centralized Directory & State Management:
+   - Today's calls JSON saved strictly inside 'DATABASE/BOOKING CALLS FOR TODAY/booking_calls_for_today.json'
+5. Interactive PyQt6 CRM interface with editable room card containers and 6 standardized statuses.
 """
 
 import os
@@ -22,6 +24,7 @@ from datetime import datetime, date, timedelta
 from typing import Dict, List, Tuple, Optional, Any
 
 import openpyxl
+from openpyxl.styles import PatternFill, Font, Alignment
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QTextEdit, QLineEdit, QScrollArea, QFrame,
@@ -38,7 +41,7 @@ from data_manager import (
 
 BOOKING_CALLS_DIR = os.path.join(BASE_DIR, "BOOKING CALLS")
 BOOKING_CALLS_XLSX = os.path.join(BOOKING_CALLS_DIR, "BOOKING CALLS.xlsx")
-TEMPLATE_BOOKING_CALLS_XLSX = resolve_template_path("booking_calls") or os.path.join(BASE_DIR, "templates", "booking calls template", "BOOKING CALLS.xlsx")
+TEMPLATE_BOOKING_CALLS_XLSX = resolve_template_path("booking_calls") or os.path.join(BASE_DIR, "TEMPLATES", "BOOKING CALLS TEMPLATE", "BOOKING CALLS.xlsx")
 BOOKING_CALLS_STATE_PATH = os.path.join(BOOKING_CALLS_TODAY_DIR, "booking_calls_state.json")
 
 os.makedirs(BOOKING_CALLS_DIR, exist_ok=True)
@@ -55,12 +58,12 @@ CALL_STATUSES = [
 ]
 
 STATUS_COLORS = {
-    "Green": {"bg": "#D4EDDA", "border": "#28A745", "text": "#155724"},
-    "Red": {"bg": "#F8D7DA", "border": "#DC3545", "text": "#721C24"},
-    "Yellow": {"bg": "#FFF3CD", "border": "#FFC107", "text": "#856404"},
-    "N/A (NO ANSWER)": {"bg": "#E2E3E5", "border": "#6C757D", "text": "#383D41"},
-    "N/E (NO ENGLISH)": {"bg": "#D1ECF1", "border": "#17A2B8", "text": "#0C5460"},
-    "N/W (LINE NOT WORKING)": {"bg": "#F5C6CB", "border": "#C82333", "text": "#491217"}
+    "Green": {"bg": "#D4EDDA", "border": "#28A745", "text": "#155724", "excel_hex": "D4EDDA"},
+    "Red": {"bg": "#F8D7DA", "border": "#DC3545", "text": "#721C24", "excel_hex": "F8D7DA"},
+    "Yellow": {"bg": "#FFF3CD", "border": "#FFC107", "text": "#856404", "excel_hex": "FFF3CD"},
+    "N/A (NO ANSWER)": {"bg": "#E2E3E5", "border": "#6C757D", "text": "#383D41", "excel_hex": "E2E3E5", "code": "N/A"},
+    "N/E (NO ENGLISH)": {"bg": "#D1ECF1", "border": "#17A2B8", "text": "#0C5460", "excel_hex": "D1ECF1", "code": "N/E"},
+    "N/W (LINE NOT WORKING)": {"bg": "#F5C6CB", "border": "#C82333", "text": "#491217", "excel_hex": "F5C6CB", "code": "N/W"}
 }
 
 
@@ -148,55 +151,54 @@ def parse_date_str(date_str: str) -> Optional[date]:
         try:
             return datetime.strptime(cleaned, fmt).date()
         except ValueError:
-            continue
+            pass
     return None
 
 
 # =============================================================================
-# Booking Calls Manager (Strict Booking.com Engine)
+# Booking Calls Manager Engine & Excel Synchronization
 # =============================================================================
 
 class BookingCallsManager:
     """
-    Coordinates Excel synchronization (BOOKING CALLS.xlsx), strict Booking.com
-    filtering, and state generation into 'booking calls for today/booking_calls_today.json'.
+    Core business logic for the Booking Calls CRM module.
+    Handles scheduling, Excel updates for Sheet 1 (Arrivals) and Sheet 2 (Follow-Up),
+    direct cell manipulation (color highlight & status string insertion), and JSON persistence.
     """
 
-    def __init__(self, xlsx_path: str = BOOKING_CALLS_XLSX,
-                 state_path: str = BOOKING_CALLS_STATE_PATH,
-                 today_json_path: str = BOOKING_CALLS_TODAY_JSON):
+    def __init__(
+        self,
+        data_manager: Optional[InHouseDataManager] = None,
+        xlsx_path: str = BOOKING_CALLS_XLSX,
+        state_path: str = BOOKING_CALLS_STATE_PATH,
+        today_json_path: str = BOOKING_CALLS_TODAY_JSON
+    ):
+        self.data_manager = data_manager or InHouseDataManager()
         self.xlsx_path = os.path.abspath(xlsx_path)
         self.state_path = os.path.abspath(state_path)
         self.today_json_path = os.path.abspath(today_json_path)
-        os.makedirs(os.path.dirname(self.xlsx_path), exist_ok=True)
-        os.makedirs(os.path.dirname(self.state_path), exist_ok=True)
-        os.makedirs(os.path.dirname(self.today_json_path), exist_ok=True)
-        self.data_manager = InHouseDataManager()
-        if not os.path.exists(self.state_path):
-            self.save_calls_state({})
 
     # -------------------------------------------------------------------------
     # State Persistence
     # -------------------------------------------------------------------------
     def load_calls_state(self) -> Dict[str, Any]:
-        """Loads master call notes and statuses from BOOKING CALLS/booking_calls_state.json."""
-        if not os.path.exists(self.state_path):
-            return {}
-        try:
-            with open(self.state_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return data if isinstance(data, dict) else {}
-        except Exception as e:
-            print(f"[BookingCallsManager] Error loading calls state: {e}")
-            return {}
+        """Loads master booking calls state (call history, notes, status)."""
+        if os.path.exists(self.state_path):
+            try:
+                with open(self.state_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        return data
+            except Exception as e:
+                print(f"[BookingCallsManager] Error reading calls state: {e}")
+        return {}
 
     def save_calls_state(self, state: Dict[str, Any]):
-        """Persists master call notes and statuses to DATABASE/booking calls for today/booking_calls_state.json."""
+        """Persists master calls state."""
         try:
             target_fname = os.path.basename(self.state_path)
-            # If self.state_path is customized, save to dirname or subfolder
             if self.state_path == BOOKING_CALLS_STATE_PATH:
-                save_and_archive_json(state, target_fname, subfolder="booking calls for today")
+                save_and_archive_json(state, target_fname, subfolder="BOOKING CALLS FOR TODAY")
             else:
                 os.makedirs(os.path.dirname(self.state_path), exist_ok=True)
                 temp_path = self.state_path + ".tmp"
@@ -210,13 +212,10 @@ class BookingCallsManager:
             print(f"[BookingCallsManager] Error saving calls state: {e}")
 
     # -------------------------------------------------------------------------
-    # Today's Specific Calls JSON (booking calls for today/booking_calls_today.json)
+    # Today's Specific Calls JSON
     # -------------------------------------------------------------------------
     def load_today_calls_json(self) -> List[Dict[str, Any]]:
-        """
-        Reads today's scheduled calls strictly from 'booking calls for today/booking_calls_today.json'.
-        If missing, generates it dynamically.
-        """
+        """Reads today's scheduled calls strictly from BOOKING CALLS FOR TODAY/booking_calls_for_today.json."""
         if os.path.exists(self.today_json_path):
             try:
                 with open(self.today_json_path, "r", encoding="utf-8") as f:
@@ -228,26 +227,19 @@ class BookingCallsManager:
             except Exception as e:
                 print(f"[BookingCallsManager] Error reading today JSON: {e}")
 
-        # If not present or corrupted, generate fresh
         return self.generate_today_booking_calls_json()
 
     def save_today_calls_json(self, calls_list: List[Dict[str, Any]]):
-        """Strictly saves today's booking calls into 'DATABASE/booking calls for today/booking_calls_today.json'."""
+        """Strictly saves today's booking calls into DATABASE/BOOKING CALLS FOR TODAY/booking_calls_for_today.json."""
         try:
-            payload = {
-                "date": date.today().strftime("%Y-%m-%d"),
-                "last_updated": datetime.now().isoformat(),
-                "total_calls": len(calls_list),
-                "calls": calls_list
-            }
             target_fname = os.path.basename(self.today_json_path)
             if self.today_json_path == BOOKING_CALLS_TODAY_JSON:
-                save_and_archive_json(payload, target_fname, subfolder="booking calls for today")
+                save_and_archive_json(calls_list, target_fname, subfolder="BOOKING CALLS FOR TODAY")
             else:
                 os.makedirs(os.path.dirname(self.today_json_path), exist_ok=True)
                 temp_path = self.today_json_path + ".tmp"
                 with open(temp_path, "w", encoding="utf-8") as f:
-                    json.dump(payload, f, ensure_ascii=False, indent=4)
+                    json.dump(calls_list, f, ensure_ascii=False, indent=4)
                 if os.path.exists(self.today_json_path):
                     os.replace(temp_path, self.today_json_path)
                 else:
@@ -256,13 +248,13 @@ class BookingCallsManager:
             print(f"[BookingCallsManager] Error saving today calls JSON: {e}")
 
     # -------------------------------------------------------------------------
-    # -------------------------------------------------------------------------
     # Excel Workbook Helpers
     # -------------------------------------------------------------------------
     def _get_or_create_workbook(self) -> openpyxl.Workbook:
-        """Loads BOOKING CALLS.xlsx or copies it from TEMPLATES or creates it with default sheets if missing."""
+        """Loads BOOKING CALLS.xlsx or copies it from TEMPLATES or creates it with default sheets."""
         if os.path.exists(self.xlsx_path):
             return openpyxl.load_workbook(self.xlsx_path)
+
         resolved_tpl = resolve_template_path("booking_calls") or TEMPLATE_BOOKING_CALLS_XLSX
         if resolved_tpl and os.path.exists(resolved_tpl):
             try:
@@ -271,11 +263,14 @@ class BookingCallsManager:
                 return openpyxl.load_workbook(self.xlsx_path)
             except Exception as e:
                 print(f"[BookingCallsManager] Error copying template from {resolved_tpl}: {e}")
+
         wb = openpyxl.Workbook()
-        ws_sheet1 = wb.active
-        ws_sheet1.title = "Sheet 1"  # Preserved unpopulated per specification
-        ws_f1 = wb.create_sheet("FOLLOW UP 1")
-        ws_f1.cell(1, 1).value = "DATE"
+        ws_arr = wb.active
+        ws_arr.title = "ARRIVALS"
+        ws_arr.cell(1, 1).value = "DATE"
+
+        ws_fu = wb.create_sheet("FOLLOW UP")
+        ws_fu.cell(1, 1).value = "DATE"
         try:
             wb.save(self.xlsx_path)
         except PermissionError:
@@ -285,16 +280,21 @@ class BookingCallsManager:
             )
         return wb
 
-    def _get_followup_sheet(self, wb: openpyxl.Workbook):
-        """Locates the designated Follow-Up sheet. Strictly avoids Sheet 1."""
+    def _get_sheet(self, wb: openpyxl.Workbook, sheet_type: str):
+        """Locates the designated sheet ('ARRIVALS' or 'FOLLOW UP')."""
+        target = sheet_type.upper().strip()
         for name in wb.sheetnames:
-            norm = name.strip().upper()
-            if "FOLLOW" in norm and "UP" in norm:
+            if target == name.strip().upper():
                 return wb[name]
-        # If no Follow-Up sheet exists, create it
-        ws = wb.create_sheet("FOLLOW UP 1")
-        ws.cell(1, 1).value = "DATE"
-        return ws
+        for name in wb.sheetnames:
+            if target in name.strip().upper():
+                return wb[name]
+        if target == "ARRIVALS":
+            return wb.worksheets[0]
+        else:
+            if len(wb.sheetnames) > 1:
+                return wb.worksheets[1]
+            return wb.create_sheet("FOLLOW UP")
 
     def _save_workbook(self, wb: openpyxl.Workbook):
         """Safely saves workbook, catching Excel file locks."""
@@ -307,6 +307,7 @@ class BookingCallsManager:
             )
 
     def _find_or_create_date_column(self, ws, target_date: date) -> int:
+        """Finds or appends a date column in row 1."""
         target_dt = datetime(target_date.year, target_date.month, target_date.day)
         for c in range(1, ws.max_column + 1):
             val = ws.cell(1, c).value
@@ -325,35 +326,74 @@ class BookingCallsManager:
         return new_col
 
     # -------------------------------------------------------------------------
-    # Sheet 1 Constraint: STRICTLY DO NOT USE SHEET 1
+    # Sheet 1: Populate Arrivals strictly for BOOKING.COM
     # -------------------------------------------------------------------------
     def sync_today_arrivals_to_excel(self, target_date: Optional[date] = None) -> List[str]:
         """
-        Maintained for backwards-compatibility.
-        Per specification: 'All booking calls data must be populated strictly in
-        the Follow-Up Sheet (do not use Sheet 1).'
-        Therefore, this operation strictly does NOT write to Sheet 1.
+        Populates Sheet 1 (ARRIVALS) of BOOKING CALLS.xlsx strictly with
+        today's arrivals where agency is BOOKING.COM.
         """
-        return []
+        if target_date is None:
+            target_date = date.today()
+
+        wb = self._get_or_create_workbook()
+        ws = self._get_sheet(wb, "ARRIVALS")
+
+        # Pull today's arrivals
+        arrivals_state = self.data_manager.load_arrivals_state()
+        beach_arrivals = arrivals_state.get("SANDY BEACH", {})
+
+        booking_com_rooms: List[str] = []
+        for b_id, arr_data in beach_arrivals.items():
+            if not isinstance(arr_data, dict):
+                continue
+            if not is_booking_com(arr_data):
+                continue
+            room = str(arr_data.get("room", "")).strip()
+            if room and room not in booking_com_rooms:
+                booking_com_rooms.append(room)
+
+        # Fallback to master state arrivals matching target_date if arrivals list is empty
+        if not booking_com_rooms:
+            master = self.data_manager.load_master_state()
+            for b_id, b_data in master.items():
+                if not isinstance(b_data, dict) or not is_booking_com(b_data):
+                    continue
+                arr_dt = parse_date_str(b_data.get("Άφιξη", ""))
+                if arr_dt == target_date:
+                    room = str(b_data.get("Δωμάτιο", "")).strip()
+                    if room and room not in booking_com_rooms:
+                        booking_com_rooms.append(room)
+
+        # Write to date column
+        col_idx = self._find_or_create_date_column(ws, target_date)
+        for r in range(3, max(ws.max_row + 1, 50)):
+            ws.cell(r, col_idx).value = None
+
+        for idx, room in enumerate(booking_com_rooms):
+            row_num = idx + 3
+            if not ws.cell(row_num, 1).value:
+                ws.cell(row_num, 1).value = idx + 1
+            val = int(room) if room.isdigit() else room
+            ws.cell(row_num, col_idx).value = val
+
+        self._save_workbook(wb)
+        return booking_com_rooms
 
     # -------------------------------------------------------------------------
-    # Synchronize Follow-Up Sheet - STRICTLY BOOKING.COM ONLY
+    # Sheet 2: Synchronize Follow-Up Schedule - STRICTLY BOOKING.COM ONLY
     # -------------------------------------------------------------------------
     def sync_followup_schedule_to_excel(self) -> Dict[date, List[str]]:
         """
         Calculates the calling schedule strictly for active BOOKING.COM bookings
-        using Rules 1, 2, 3, and 4, and populates STRICTLY in the Follow-Up Sheet.
-        Does NOT touch or use Sheet 1.
+        using Rules 1, 2, 3, and 4, and populates Sheet 2 (FOLLOW UP).
         """
         wb = self._get_or_create_workbook()
         master_state = self.data_manager.load_master_state()
         date_to_rooms: Dict[date, List[str]] = {}
 
         for b_id, booking in master_state.items():
-            if not isinstance(booking, dict):
-                continue
-            # Strict Booking.com Filter
-            if not is_booking_com(booking):
+            if not isinstance(booking, dict) or not is_booking_com(booking):
                 continue
 
             room = str(booking.get("Δωμάτιο", "")).strip()
@@ -370,8 +410,7 @@ class BookingCallsManager:
                 if room not in date_to_rooms[call_dt]:
                     date_to_rooms[call_dt].append(room)
 
-        # Strictly locate and populate the Follow-Up Sheet
-        ws = self._get_followup_sheet(wb)
+        ws = self._get_sheet(wb, "FOLLOW UP")
 
         for sched_date, rooms in date_to_rooms.items():
             col_idx = self._find_or_create_date_column(ws, sched_date)
@@ -387,17 +426,105 @@ class BookingCallsManager:
 
         self._save_workbook(wb)
 
-        # Also update today's calls JSON in 'DATABASE/booking calls for today/'
+        # Update today's calls JSON in DATABASE/BOOKING CALLS FOR TODAY/
         self.generate_today_booking_calls_json()
         return date_to_rooms
 
     # -------------------------------------------------------------------------
-    # Generate & Save Today's Calls JSON in 'booking calls for today'
+    # Direct Excel Cell Manipulation (Color Highlighting & Status String Insertion)
+    # -------------------------------------------------------------------------
+    def update_excel_cell_status(self, room: str, status: str, target_date: Optional[date] = None, sheet_name: Optional[str] = None) -> bool:
+        """
+        Directly manipulates the cell in BOOKING CALLS.xlsx for that room number:
+          - Color Highlighting:
+            If Green, Yellow, or Red -> sets the cell background fill:
+              Green: #D4EDDA
+              Yellow: #FFF3CD
+              Red: #F8D7DA
+          - Status String Insertion:
+            If N/A (NO ANSWER), N/E (NO ENGLISH), or N/W (LINE NOT WORKING):
+            writes code string directly into the SAME CELL alongside room number:
+              e.g., '1024 N/A', '2015 N/E', '1102 N/W'
+        """
+        if not os.path.exists(self.xlsx_path):
+            return False
+
+        if target_date is None:
+            target_date = date.today()
+
+        clean_room = str(room).strip()
+        if not clean_room:
+            return False
+
+        try:
+            wb = openpyxl.load_workbook(self.xlsx_path)
+        except Exception as e:
+            print(f"[BookingCallsManager] Could not open workbook for direct cell manipulation: {e}")
+            return False
+
+        modified = False
+        status_info = STATUS_COLORS.get(status, {})
+
+        # Determine target fill
+        hex_color = status_info.get("excel_hex")
+        fill_to_apply = PatternFill(start_color=hex_color, end_color=hex_color, fill_type="solid") if hex_color else None
+
+        # Determine cell value
+        code = status_info.get("code")
+        if code:
+            new_cell_value = f"{clean_room} {code}"
+        else:
+            new_cell_value = int(clean_room) if clean_room.isdigit() else clean_room
+
+        # Search across target sheet or all sheets
+        target_sheets = [sheet_name] if sheet_name and sheet_name in wb.sheetnames else wb.sheetnames
+        for sname in target_sheets:
+            ws = wb[sname]
+            # Find date column if possible
+            target_cols = []
+            for c in range(1, ws.max_column + 1):
+                val = ws.cell(1, c).value
+                if isinstance(val, (datetime, date)):
+                    vd = val.date() if isinstance(val, datetime) else val
+                    if vd == target_date:
+                        target_cols.append(c)
+                elif isinstance(val, str):
+                    p = parse_date_str(val)
+                    if p and p == target_date:
+                        target_cols.append(c)
+
+            # If date column not identified, search all columns
+            cols_to_check = target_cols if target_cols else range(1, ws.max_column + 1)
+
+            for col_idx in cols_to_check:
+                for row_idx in range(2, max(ws.max_row + 1, 50)):
+                    cell = ws.cell(row_idx, col_idx)
+                    cv = cell.value
+                    if cv is None:
+                        continue
+                    cv_str = str(cv).strip()
+                    # Match clean room or room with status suffix
+                    if cv_str == clean_room or cv_str.startswith(f"{clean_room} ") or (clean_room.isdigit() and cv == int(clean_room)):
+                        cell.value = new_cell_value
+                        if fill_to_apply:
+                            cell.fill = fill_to_apply
+                        modified = True
+
+        if modified:
+            try:
+                self._save_workbook(wb)
+            except Exception as e:
+                print(f"[BookingCallsManager] Error saving workbook after cell manipulation: {e}")
+
+        return modified
+
+    # -------------------------------------------------------------------------
+    # Generate & Save Today's Calls JSON in 'BOOKING CALLS FOR TODAY'
     # -------------------------------------------------------------------------
     def generate_today_booking_calls_json(self, target_date: Optional[date] = None) -> List[Dict[str, Any]]:
         """
-        Calculates and generates today's scheduled calls strictly for BOOKING.COM,
-        saving the output into 'booking calls for today/booking_calls_today.json'.
+        Calculates today's scheduled calls strictly for BOOKING.COM,
+        saving the output into DATABASE/BOOKING CALLS FOR TODAY/booking_calls_for_today.json.
         """
         if target_date is None:
             target_date = date.today()
@@ -409,12 +536,8 @@ class BookingCallsManager:
 
         scheduled_rooms_data: List[Dict[str, Any]] = []
 
-        # Scan active in-house bookings
         for b_id, booking in master_state.items():
-            if not isinstance(booking, dict):
-                continue
-            # Strict Booking.com Filter
-            if not is_booking_com(booking):
+            if not isinstance(booking, dict) or not is_booking_com(booking):
                 continue
 
             room = str(booking.get("Δωμάτιο", "")).strip()
@@ -426,13 +549,12 @@ class BookingCallsManager:
 
             sched_dates = calculate_call_schedule(arr_date, dep_date)
             if target_date in sched_dates:
-                prop = "SANDY VILLAS" if len(room) == 3 else "SANDY BEACH"
                 guest_names = booking.get("Πελάτες", [])
                 saved_item = saved_today.get(room, {})
 
                 call_record = {
                     "room": room,
-                    "property": prop,
+                    "property": "SANDY BEACH",
                     "booking_id": b_id,
                     "guest_name": ", ".join(guest_names) if guest_names else "Guest",
                     "agency": "BOOKING.COM",
@@ -445,20 +567,19 @@ class BookingCallsManager:
                 }
                 scheduled_rooms_data.append(call_record)
 
-        # Strictly persist into 'booking calls for today/booking_calls_today.json'
         self.save_today_calls_json(scheduled_rooms_data)
         return scheduled_rooms_data
 
     def save_room_call(self, room: str, status: str, notes: str,
-                       call_date: Optional[date] = None,
-                       additional_data: Optional[Dict[str, Any]] = None):
-        """Saves a call note/status both to master state and today's calls JSON."""
+                        call_date: Optional[date] = None,
+                        additional_data: Optional[Dict[str, Any]] = None):
+        """Saves status/notes to JSON and performs direct Excel cell manipulation."""
         if call_date is None:
             call_date = date.today()
 
         date_key = call_date.strftime("%Y-%m-%d")
 
-        # 1. Update Master Calls State (BOOKING CALLS/booking_calls_state.json)
+        # 1. Update Master Calls State
         calls_state = self.load_calls_state()
         if date_key not in calls_state:
             calls_state[date_key] = {}
@@ -473,7 +594,7 @@ class BookingCallsManager:
         calls_state[date_key][room] = entry
         self.save_calls_state(calls_state)
 
-        # 2. Update Today Calls JSON (booking calls for today/booking_calls_today.json)
+        # 2. Update Today Calls JSON
         today_calls = self.load_today_calls_json()
         updated = False
         for c in today_calls:
@@ -496,32 +617,24 @@ class BookingCallsManager:
 
         self.save_today_calls_json(today_calls)
 
+        # 3. Direct Excel Cell Manipulation
+        self.update_excel_cell_status(room, status, call_date)
+
 
 # =============================================================================
-# Explicit Non-Wheel ComboBox (Non-Sensitive UI)
+# Explicit Non-Wheel ComboBox
 # =============================================================================
 
 class ExplicitComboBox(QComboBox):
-    """
-    QComboBox subclass that ignores mouse wheel events to prevent
-    accidental status changes when scrolling through room cards.
-    Selecting a status requires a definitive, explicit user click.
-    """
     def wheelEvent(self, e):
         e.ignore()
 
 
 # =============================================================================
-# PyQt6 Room Box Container Widget (Editable Card)
+# PyQt6 Room Call Card Widget
 # =============================================================================
 
 class RoomCallCard(QFrame):
-    """
-    Individual, editable UI box container representing a scheduled Booking.com room call.
-    Equipped with room details, editable notes, automatic/manual To Do List feedback capture,
-    and exactly 6 standardized status options.
-    """
-
     status_changed = pyqtSignal(str, str, str)  # room, status, notes
     feedback_submitted = pyqtSignal(str, str)   # room, comment_text
 
@@ -540,30 +653,23 @@ class RoomCallCard(QFrame):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
 
-        # Header Row: Room Number + Property Badge + Booking.com tag
+        # Header Row
         top_row = QHBoxLayout()
         lbl_room = QLabel(f"🏠 Room {self.room}")
         lbl_room.setStyleSheet("font-size: 16px; font-weight: bold; color: #1E293B;")
         top_row.addWidget(lbl_room)
-
         top_row.addStretch()
 
         lbl_bcom = QLabel("BOOKING.COM")
         lbl_bcom.setStyleSheet("background-color: #003580; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold; font-size: 10px;")
         top_row.addWidget(lbl_bcom)
 
-        prop = self.call_data.get("property", "SANDY BEACH")
-        prop_style = (
-            "background-color: #DBEAFE; color: #1E40AF; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;"
-            if "BEACH" in prop.upper()
-            else "background-color: #D1FAE5; color: #065F46; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;"
-        )
-        lbl_prop = QLabel(prop)
-        lbl_prop.setStyleSheet(prop_style)
+        lbl_prop = QLabel("SANDY BEACH")
+        lbl_prop.setStyleSheet("background-color: #DBEAFE; color: #1E40AF; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;")
         top_row.addWidget(lbl_prop)
         layout.addLayout(top_row)
 
-        # Guest & Stay Info Row
+        # Guest & Stay Info
         guest_text = self.call_data.get("guest_name", "Guest")
         b_id = self.call_data.get("booking_id", "")
         arr = self.call_data.get("arrival", "-")
@@ -578,7 +684,7 @@ class RoomCallCard(QFrame):
         lbl_stay.setStyleSheet("color: #64748B; font-size: 11px;")
         layout.addWidget(lbl_stay)
 
-        # Status Selector (Exact 6 standardized status options with non-sensitive explicit click)
+        # Status Selector
         status_row = QHBoxLayout()
         lbl_status_title = QLabel("Call Status:")
         lbl_status_title.setStyleSheet("font-weight: bold; color: #334155;")
@@ -594,12 +700,11 @@ class RoomCallCard(QFrame):
         else:
             self.cmb_status.setCurrentIndex(0)
 
-        # Definitive, explicit user click required
         self.cmb_status.activated.connect(self._on_status_activated)
         status_row.addWidget(self.cmb_status, stretch=1)
         layout.addLayout(status_row)
 
-        # Editable Notes / Feedback Header with status badge
+        # Notes / Feedback
         notes_header = QHBoxLayout()
         lbl_notes = QLabel("Call Notes / Guest Feedback:")
         lbl_notes.setStyleSheet("font-weight: bold; color: #334155;")
@@ -630,7 +735,7 @@ class RoomCallCard(QFrame):
         """)
         layout.addWidget(self.txt_notes)
 
-        # Action bar with explicit submit button
+        # Action bar
         action_row = QHBoxLayout()
         self.btn_send_todo = QPushButton("📝 Add Feedback to To Do List")
         self.btn_send_todo.setStyleSheet("""
@@ -653,7 +758,7 @@ class RoomCallCard(QFrame):
         action_row.addWidget(self.btn_send_todo)
         layout.addLayout(action_row)
 
-        # Automatic capture timer: triggers 1.5s after user stops typing
+        # Auto capture timer
         self.auto_capture_timer = QTimer(self)
         self.auto_capture_timer.setSingleShot(True)
         self.auto_capture_timer.setInterval(1500)
@@ -708,7 +813,7 @@ class RoomCallCard(QFrame):
     def get_data(self) -> Dict[str, Any]:
         return {
             "room": self.room,
-            "property": self.call_data.get("property", ""),
+            "property": "SANDY BEACH",
             "booking_id": self.call_data.get("booking_id", ""),
             "guest_name": self.call_data.get("guest_name", ""),
             "agency": "BOOKING.COM",
@@ -726,8 +831,8 @@ class RoomCallCard(QFrame):
 class BookingCallsWidget(QWidget):
     """
     Main CRM interface for the BOOKING CALLS module in app.py.
-    Strictly displays today's scheduled calls reading from:
-    'DATABASE/booking calls for today/booking_calls_today.json'.
+    Strictly displays today's scheduled calls from:
+    'DATABASE/BOOKING CALLS FOR TODAY/booking_calls_for_today.json'.
     """
 
     feedback_submitted = pyqtSignal(str, str)  # room, comment_text
@@ -744,7 +849,7 @@ class BookingCallsWidget(QWidget):
         main_layout.setContentsMargins(16, 16, 16, 16)
         main_layout.setSpacing(12)
 
-        # 1. Header Banner
+        # Header Banner
         header_card = QFrame()
         header_card.setStyleSheet("""
             QFrame {
@@ -760,12 +865,11 @@ class BookingCallsWidget(QWidget):
         lbl_title = QLabel("📞 BOOKING CALLS CRM (BOOKING.COM ONLY)")
         lbl_title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
         today_str = date.today().strftime("%A, %d %B %Y")
-        lbl_sub = QLabel(f"Scheduled follow-up calls for today ({today_str}) — Source: database/booking calls for today/")
+        lbl_sub = QLabel(f"Scheduled follow-up calls for today ({today_str}) — Source: DATABASE/BOOKING CALLS FOR TODAY/")
         lbl_sub.setStyleSheet("color: #DBEAFE; font-size: 12px;")
         v_titles.addWidget(lbl_title)
         v_titles.addWidget(lbl_sub)
         h_layout.addLayout(v_titles)
-
         h_layout.addStretch()
 
         self.lbl_total_badge = QLabel("Booking.com Calls: 0")
@@ -773,10 +877,9 @@ class BookingCallsWidget(QWidget):
             "background-color: rgba(255, 255, 255, 0.2); padding: 6px 12px; border-radius: 6px; font-weight: bold;"
         )
         h_layout.addWidget(self.lbl_total_badge)
-
         main_layout.addWidget(header_card)
 
-        # 2. Control Bar (Search, Property Filter, Status Filter, Sync Button)
+        # Control Bar
         ctrl_bar = QHBoxLayout()
 
         self.txt_search = QLineEdit()
@@ -784,11 +887,6 @@ class BookingCallsWidget(QWidget):
         self.txt_search.setFixedWidth(280)
         self.txt_search.textChanged.connect(self._apply_filters)
         ctrl_bar.addWidget(self.txt_search)
-
-        self.cmb_filter_prop = QComboBox()
-        self.cmb_filter_prop.addItems(["All Properties", "Sandy Beach", "Sandy Villas"])
-        self.cmb_filter_prop.currentTextChanged.connect(self._apply_filters)
-        ctrl_bar.addWidget(self.cmb_filter_prop)
 
         self.cmb_filter_status = QComboBox()
         self.cmb_filter_status.addItems(["All Statuses"] + CALL_STATUSES)
@@ -829,7 +927,7 @@ class BookingCallsWidget(QWidget):
 
         main_layout.addLayout(ctrl_bar)
 
-        # 3. Scrollable Cards Grid Container
+        # Scrollable Cards Grid Container
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
@@ -845,19 +943,18 @@ class BookingCallsWidget(QWidget):
         main_layout.addWidget(self.scroll_area, stretch=1)
 
     def refresh_calls(self):
-        """Strictly loads today's calls from 'DATABASE/booking calls for today/booking_calls_today.json'."""
+        """Strictly loads today's calls from DATABASE/BOOKING CALLS FOR TODAY/booking_calls_for_today.json."""
         for card in self.cards:
             self.grid_layout.removeWidget(card)
             card.deleteLater()
         self.cards.clear()
 
-        # Read strictly from database/booking calls for today/ directory JSON
         calls_data = self.manager.load_today_calls_json()
         self.lbl_total_badge.setText(f"Booking.com Scheduled: {len(calls_data)}")
 
         if not calls_data:
             lbl_empty = QLabel(
-                "No Booking.com calls scheduled for today in 'database/booking calls for today/'.\n"
+                "No Booking.com calls scheduled for today in 'DATABASE/BOOKING CALLS FOR TODAY/'.\n"
                 "Click '🔄 Sync Excel & Today\\'s JSON' to calculate the schedule."
             )
             lbl_empty.setStyleSheet("color: #64748B; font-size: 14px; font-style: italic; padding: 20px;")
@@ -879,7 +976,6 @@ class BookingCallsWidget(QWidget):
 
     def _apply_filters(self):
         search_query = self.txt_search.text().strip().lower()
-        prop_filter = self.cmb_filter_prop.currentText().upper()
         status_filter = self.cmb_filter_status.currentText()
 
         visible_count = 0
@@ -888,7 +984,6 @@ class BookingCallsWidget(QWidget):
             room = data["room"].lower()
             guest = data["guest_name"].lower()
             b_id = data["booking_id"].lower()
-            prop = data["property"].upper()
             status = data["status"]
 
             match_search = (
@@ -898,18 +993,12 @@ class BookingCallsWidget(QWidget):
                 or search_query in b_id
             )
 
-            match_prop = (
-                prop_filter == "ALL PROPERTIES"
-                or (prop_filter == "SANDY BEACH" and "BEACH" in prop)
-                or (prop_filter == "SANDY VILLAS" and "VILLA" in prop)
-            )
-
             match_status = (
                 status_filter == "All Statuses"
                 or status == status_filter
             )
 
-            is_visible = match_search and match_prop and match_status
+            is_visible = match_search and match_status
             card.setVisible(is_visible)
             if is_visible:
                 visible_count += 1
@@ -917,8 +1006,9 @@ class BookingCallsWidget(QWidget):
         self.lbl_total_badge.setText(f"Showing: {visible_count} of {len(self.cards)}")
 
     def sync_and_refresh(self):
-        """Syncs Follow-Up sheet for Booking.com only and updates today's JSON."""
+        """Syncs Sheet 1 (Arrivals) and Sheet 2 (Follow-Up) for Booking.com only and updates today's JSON."""
         try:
+            arr_rooms = self.manager.sync_today_arrivals_to_excel()
             schedule = self.manager.sync_followup_schedule_to_excel()
             today_calls = self.manager.generate_today_booking_calls_json()
 
@@ -927,10 +1017,10 @@ class BookingCallsWidget(QWidget):
                 self,
                 "Sync Complete",
                 f"Booking.com Calls synchronized successfully!\n\n"
-                f"• Scheduled Booking.com Follow-Up Dates: {len(schedule)} dates\n"
-                f"• Today's Scheduled Calls: {len(today_calls)} rooms\n"
-                f"• All data strictly populated in the Follow-Up Sheet (Sheet 1 untouched)\n\n"
-                f"Output saved strictly to: 'database/booking calls for today/booking_calls_today.json'"
+                f"• Sheet 1 (ARRIVALS): {len(arr_rooms)} Booking.com arrivals populated\n"
+                f"• Sheet 2 (FOLLOW UP): {len(schedule)} follow-up dates scheduled\n"
+                f"• Today's Scheduled Calls: {len(today_calls)} rooms\n\n"
+                f"Output saved strictly to: 'DATABASE/BOOKING CALLS FOR TODAY/booking_calls_for_today.json'"
             )
         except Exception as e:
             QMessageBox.critical(self, "Sync Error", f"Failed to synchronize Booking Calls:\n{str(e)}")

@@ -31,7 +31,7 @@ _load_env_file()
 from data_manager import resolve_template_path, DATABASE_DIR, OUTPUT_DIR, TODAYS_LIST_DIR
 
 ARRIVALS_FOLDER = os.path.abspath(DATABASE_DIR)
-FINAL_FOLDER = os.path.abspath(os.path.join(OUTPUT_DIR, "offers"))
+FINAL_FOLDER = os.path.abspath(os.path.join(OUTPUT_DIR, "OFFERS"))
 TODAY_LIST_FOLDER = os.path.abspath(TODAYS_LIST_DIR)
 
 TEMPLATE_PATH = resolve_template_path("offer_list") or os.path.abspath(os.path.join(BASE_DIR, "templates", "offer list template", "OFFER LIST TEMPLATE.docx"))

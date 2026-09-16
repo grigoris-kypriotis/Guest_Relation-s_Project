@@ -1,10 +1,10 @@
 """
 Data Manager Module: Ingestion, State Management, Room-Move Detection & Gatekeeper
 ===================================================================================
-Handles daily 'In-House List' and 'Arrivals' CSV exports, maintains master_state.json
-and state_metadata.json in the root directory, autonomously sorts and routes all JSON
-files into designated property directories, detects room-moves / check-ins / check-outs,
-cleans up processed CSV files, and enforces Gatekeeper startup validation.
+Handles daily 'In-House List' and 'Arrivals' CSV exports for Sandy Beach, maintains
+DATABASE/HOTEL STATE/master_state.json and state_metadata.json, standardizes strictly
+on the centralized DATABASE/ directory topology, detects room moves (strictly excluding
+room merges) and checkouts, and enforces sequential Gatekeeper startup validation.
 """
 
 import os
@@ -21,84 +21,74 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFileDialog, QTableWidget, QTableWidgetItem, QHeaderView,
     QMessageBox, QProgressBar, QFrame, QScrollArea, QWidget,
-    QApplication, QTextEdit, QTabWidget, QGroupBox
+    QApplication, QTextEdit, QGroupBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE_DIR = os.path.join(BASE_DIR, "DATABASE")
-DATABASE_SUBDIR = os.path.join(DATABASE_DIR, "DATABASE")
 TEMPLATES_DIR = os.path.join(BASE_DIR, "TEMPLATES")
 OUTPUT_DIR = os.path.join(BASE_DIR, "OUTPUT")
 TRASH_DIR = os.path.join(BASE_DIR, "TRASH")
 TODAYS_LIST_DIR = os.path.join(OUTPUT_DIR, "todays_list")
 BOOKING_CALLS_DIR = os.path.join(BASE_DIR, "BOOKING CALLS")
 
-# Target Subdirectories inside database/
-BOOKING_CALLS_TODAY_DIR = os.path.join(DATABASE_DIR, "booking calls for today")
-CHECKOUT_HISTORY_DIR = os.path.join(DATABASE_DIR, "check out history")
-ROOM_MOVES_DIR = os.path.join(DATABASE_DIR, "room moves")
+# Standardized Target Directories inside DATABASE/
+HOTEL_STATE_DIR = os.path.join(DATABASE_DIR, "HOTEL STATE")
+BOOKING_CALLS_TODAY_DIR = os.path.join(DATABASE_DIR, "BOOKING CALLS FOR TODAY")
+CHECKOUT_HISTORY_DIR = os.path.join(DATABASE_DIR, "CHECK OUT HISTORY")
+ROOM_MOVES_DIR = os.path.join(DATABASE_DIR, "ROOM MOVES")
+SANDY_BEACH_DIR = os.path.join(DATABASE_DIR, "SANDY BEACH")
+SANDY_BEACH_ARRIVALS_DIR = os.path.join(SANDY_BEACH_DIR, "ARRIVALS")
+SANDY_BEACH_DEPARTURE_DIR = os.path.join(SANDY_BEACH_DIR, "DEPARTURE")
 
-# Target JSON Artifacts
-MASTER_STATE_PATH = os.path.join(DATABASE_SUBDIR, "master_state.json")
-MASTER_STATE_ROOT_PATH = os.path.join(DATABASE_DIR, "master_state.json")
-STATE_META_PATH = os.path.join(DATABASE_SUBDIR, "state_metadata.json")
-STATE_META_ROOT_PATH = os.path.join(DATABASE_DIR, "state_metadata.json")
+# Standardized Target JSON Artifacts
+MASTER_STATE_PATH = os.path.join(HOTEL_STATE_DIR, "master_state.json")
+STATE_META_PATH = os.path.join(HOTEL_STATE_DIR, "state_metadata.json")
+BOOKING_CALLS_TODAY_JSON = os.path.join(BOOKING_CALLS_TODAY_DIR, "booking_calls_for_today.json")
+CHECKOUTS_JSON = os.path.join(CHECKOUT_HISTORY_DIR, "checkouts.json")
+ROOM_MOVES_JSON = os.path.join(ROOM_MOVES_DIR, "room_moves.json")
+ARRIVALS_BEACH_PATH = os.path.join(SANDY_BEACH_ARRIVALS_DIR, "today_arrivals.json")
+DEPARTURES_BEACH_PATH = os.path.join(SANDY_BEACH_DEPARTURE_DIR, "departures_today.json")
 
-BOOKING_CALLS_TODAY_JSON = os.path.join(BOOKING_CALLS_TODAY_DIR, "booking_calls_today.json")
-BOOKING_CALLS_STATE_PATH = os.path.join(BOOKING_CALLS_TODAY_DIR, "booking_calls_state.json")
-
-CHECKOUTS_TODAY_JSON = os.path.join(CHECKOUT_HISTORY_DIR, "checkouts_today.json")
-CHECKOUT_HISTORY_PATH = CHECKOUTS_TODAY_JSON  # Alias for backward compatibility
-
-ROOM_MOVES_YESTERDAY_JSON = os.path.join(ROOM_MOVES_DIR, "room_moves_yesterday.json")
-ROOM_MOVES_HISTORY_PATH = ROOM_MOVES_YESTERDAY_JSON  # Alias for backward compatibility
+# Backward Compatibility Aliases
+MASTER_STATE_ROOT_PATH = MASTER_STATE_PATH
+STATE_META_ROOT_PATH = STATE_META_PATH
+CHECKOUTS_TODAY_JSON = CHECKOUTS_JSON
+CHECKOUT_HISTORY_PATH = CHECKOUTS_JSON
+ROOM_MOVES_YESTERDAY_JSON = ROOM_MOVES_JSON
+ROOM_MOVES_HISTORY_PATH = ROOM_MOVES_JSON
 ROOM_MOVES_LOG_PATH = os.path.join(TODAYS_LIST_DIR, "room_moves.log")
 
-# Property Abstraction Layer
 DEFAULT_PROPERTY = "sandy_beach"
 active_property = DEFAULT_PROPERTY
 
+
 def get_property_dir(property_name: str = DEFAULT_PROPERTY, base_dir: Optional[Union[str, Path]] = None) -> Path:
-    """Returns the Path directory for the specified property (e.g. 'sandy beach' or 'sandy villas')."""
+    """Returns the Path directory for the specified property (standardized on 'SANDY BEACH')."""
     db_root = Path(base_dir) if base_dir else Path(DATABASE_DIR)
-    norm = property_name.lower().replace("_", " ")
+    norm = property_name.upper().replace("_", " ")
     return db_root / norm
 
+
 def get_property_arrivals_path(property_name: str = DEFAULT_PROPERTY, base_dir: Optional[Union[str, Path]] = None) -> Path:
-    """Returns the Path to arrivals_today.json for the specified property."""
-    return get_property_dir(property_name, base_dir) / "arrivals" / "arrivals_today.json"
+    """Returns the Path to today_arrivals.json for the specified property."""
+    return get_property_dir(property_name, base_dir) / "ARRIVALS" / "today_arrivals.json"
+
 
 def get_property_departures_path(property_name: str = DEFAULT_PROPERTY, base_dir: Optional[Union[str, Path]] = None) -> Path:
     """Returns the Path to departures_today.json for the specified property."""
-    return get_property_dir(property_name, base_dir) / "departures" / "departures_today.json"
+    return get_property_dir(property_name, base_dir) / "DEPARTURE" / "departures_today.json"
 
-# Property-specific directories and paths
-SANDY_BEACH_DIR = str(get_property_dir("sandy_beach"))
-SANDY_BEACH_ARRIVALS_DIR = str(get_property_dir("sandy_beach") / "arrivals")
-SANDY_BEACH_DEPARTURES_DIR = str(get_property_dir("sandy_beach") / "departures")
-ARRIVALS_BEACH_PATH = str(get_property_arrivals_path("sandy_beach"))
-DEPARTURES_BEACH_PATH = str(get_property_departures_path("sandy_beach"))
-
-SANDY_VILLAS_DIR = str(get_property_dir("sandy_villas"))
-SANDY_VILLAS_ARRIVALS_DIR = str(get_property_dir("sandy_villas") / "arrivals")
-SANDY_VILLAS_DEPARTURES_DIR = str(get_property_dir("sandy_villas") / "departures")
-ARRIVALS_VILLAS_PATH = str(get_property_arrivals_path("sandy_villas"))
-DEPARTURES_VILLAS_PATH = str(get_property_departures_path("sandy_villas"))
-
-ARRIVALS_STATE_PATH = ARRIVALS_BEACH_PATH
-DEPARTURES_STATE_PATH = DEPARTURES_BEACH_PATH
 
 def resolve_template_path(template_type: str, base_templates_dir: Optional[Union[str, Path]] = None) -> Optional[str]:
     """
     Template Resolution Protocol:
-      - 'booking_calls': searches templates/booking calls template/ for BOOKING CALLS.xlsx
-                         (case-insensitive search for any .xlsx within this directory).
-      - 'check_memo' / 'cake_memo': searches templates/check memo template/ for .docx (CHECK MEMO.docx);
-                         if missing or empty, falls back to templates/cake memo template/ for .docx.
-      - 'offer_list': searches templates/offer list template/ for OFFER LIST TEMPLATE.docx
-                         (case-insensitive search for .docx within this directory).
+      - 'booking_calls': searches TEMPLATES/BOOKING CALLS TEMPLATE/ for BOOKING CALLS.xlsx
+      - 'cake_memo' / 'check_memo': searches TEMPLATES/CAKE MEMO TEMPLATE/ for CAKE MEMO.docx
+                                    with fallback to check memo template.
+      - 'offer_list': searches TEMPLATES/OFFER LIST TEMPLATE/ for OFFER LIST TEMPLATE.docx
     Returns the resolved absolute path as a string, or None if not found.
     """
     root_tpl = Path(base_templates_dir) if base_templates_dir else Path(TEMPLATES_DIR)
@@ -142,36 +132,28 @@ def resolve_template_path(template_type: str, base_templates_dir: Optional[Union
             return str((d / "OFFER LIST TEMPLATE.docx").resolve())
         return str((root_tpl / "offer list template" / "OFFER LIST TEMPLATE.docx").resolve())
 
-    elif "check" in ttype or "cake" in ttype or "memo" in ttype:
-        primary_dir = find_dir(root_tpl, "check memo template")
+    elif "cake" in ttype or "check" in ttype or "memo" in ttype:
+        # Prioritize cake memo template
+        primary_dir = find_dir(root_tpl, "cake memo template")
         if primary_dir and primary_dir.exists():
-            f = find_file(primary_dir, "CHECK MEMO.docx", ".docx")
+            f = find_file(primary_dir, "CAKE MEMO.docx", ".docx")
             if f:
                 return str(f.resolve())
-        fallback_dir = find_dir(root_tpl, "cake memo template")
+        fallback_dir = find_dir(root_tpl, "check memo template")
         if fallback_dir and fallback_dir.exists():
-            f = find_file(fallback_dir, "CAKE MEMO.docx", ".docx")
+            f = find_file(fallback_dir, "CHECK MEMO.docx", ".docx")
             if f:
                 return str(f.resolve())
-            return str((fallback_dir / "CAKE MEMO.docx").resolve())
-        dest = root_tpl / "check memo template" / "CHECK MEMO.docx"
-        return str(dest.resolve())
+            f2 = find_file(fallback_dir, "CAKE MEMO.docx", ".docx")
+            if f2:
+                return str(f2.resolve())
+        return str((root_tpl / "cake memo template" / "CAKE MEMO.docx").resolve())
 
     return None
 
-# Active Python Whitelist for Autonomous Cleanup
-ACTIVE_PYTHON_WHITELIST = {
-    "app.py",
-    "data_manager.py",
-    "booking_calls.py",
-    "offers_module.py",
-    "test_data_manager.py",
-    "test_booking_calls.py"
-}
-
 
 def safe_rmtree(path: str):
-    """Safely removes a directory even if it has Windows ReadOnly attributes or is a ReparsePoint."""
+    """Safely removes a directory even if it has Windows ReadOnly attributes."""
     if not os.path.exists(path):
         return
     import stat
@@ -190,59 +172,57 @@ def safe_rmtree(path: str):
 def save_and_archive_json(data: Any, target_filename: str, subfolder: Optional[str] = None, base_dir: Optional[str] = None) -> str:
     """
     Centralized, synchronous, and atomic JSON persistence helper.
-    Ensures all writes occur strictly within DATABASE/ (or DATABASE/<subfolder>/),
-    automatically routing domain-specific datasets to their designated subdirectories.
-    Writes atomically via a .tmp file, using encoding='utf-8', indent=4, ensure_ascii=False.
+    Ensures all writes occur strictly within canonical subdirectories of DATABASE/.
+    No redundant DATABASE/DATABASE/ or root mirroring.
+    Writes atomically via a .tmp file using encoding='utf-8', indent=4, ensure_ascii=False.
     Returns the absolute path to the saved file.
     """
     base_name = os.path.basename(target_filename)
+    root = base_dir if base_dir else DATABASE_DIR
 
     # Automatic routing if subfolder is not explicitly specified and target is relative
     if subfolder is None and not os.path.isabs(target_filename):
         lower_name = base_name.lower()
-        if "master_state" in lower_name or "state_meta" in lower_name:
-            if base_dir is None:
-                subfolder = "database"
+        if "master_state" in lower_name:
+            subfolder = "HOTEL STATE"
+            base_name = "master_state.json"
+        elif "state_meta" in lower_name:
+            subfolder = "HOTEL STATE"
+            base_name = "state_metadata.json"
         elif "booking" in lower_name or "call" in lower_name:
-            subfolder = "booking calls for today"
+            subfolder = "BOOKING CALLS FOR TODAY"
+            base_name = "booking_calls_for_today.json"
         elif "checkout" in lower_name or "check_out" in lower_name:
-            subfolder = "check out history"
+            subfolder = "CHECK OUT HISTORY"
+            base_name = "checkouts.json"
         elif "room_move" in lower_name or "room move" in lower_name:
-            subfolder = "room moves"
+            subfolder = "ROOM MOVES"
+            base_name = "room_moves.json"
         elif "arrival" in lower_name:
-            if "villa" in lower_name:
-                subfolder = "sandy villas/arrivals"
-            else:
-                subfolder = "sandy beach/arrivals"
+            subfolder = "SANDY BEACH/ARRIVALS"
+            base_name = "today_arrivals.json"
         elif "departure" in lower_name:
-            if "villa" in lower_name:
-                subfolder = "sandy villas/departures"
-            else:
-                subfolder = "sandy beach/departures"
+            subfolder = "SANDY BEACH/DEPARTURE"
+            base_name = "departures_today.json"
     elif subfolder:
-        norm_sub = subfolder.strip().replace("\\", "/").lower()
-        if norm_sub in ["booking calls for today", "booking_calls_for_today", "booking calls"]:
-            subfolder = "booking calls for today"
-        elif norm_sub in ["check out history", "check_out_history", "checkout history"]:
-            subfolder = "check out history"
-        elif norm_sub in ["room moves", "room_moves", "room moves history"]:
-            subfolder = "room moves"
-        elif "sandy beach" in norm_sub and "arrival" in norm_sub:
-            subfolder = "sandy beach/arrivals"
-        elif "sandy beach" in norm_sub and "departure" in norm_sub:
-            subfolder = "sandy beach/departures"
-        elif "sandy villas" in norm_sub and "arrival" in norm_sub:
-            subfolder = "sandy villas/arrivals"
-        elif "sandy villas" in norm_sub and "departure" in norm_sub:
-            subfolder = "sandy villas/departures"
-        elif norm_sub == "database":
-            subfolder = "database"
+        norm_sub = subfolder.strip().replace("\\", "/").upper()
+        if norm_sub in ["BOOKING CALLS FOR TODAY", "BOOKING_CALLS_FOR_TODAY", "BOOKING CALLS"]:
+            subfolder = "BOOKING CALLS FOR TODAY"
+        elif norm_sub in ["CHECK OUT HISTORY", "CHECK_OUT_HISTORY", "CHECKOUT HISTORY"]:
+            subfolder = "CHECK OUT HISTORY"
+        elif norm_sub in ["ROOM MOVES", "ROOM_MOVES", "ROOM MOVES HISTORY"]:
+            subfolder = "ROOM MOVES"
+        elif "HOTEL STATE" in norm_sub or norm_sub == "DATABASE":
+            subfolder = "HOTEL STATE"
+        elif "SANDY BEACH" in norm_sub and "ARRIVAL" in norm_sub:
+            subfolder = "SANDY BEACH/ARRIVALS"
+        elif "SANDY BEACH" in norm_sub and "DEPARTURE" in norm_sub:
+            subfolder = "SANDY BEACH/DEPARTURE"
 
     if os.path.isabs(target_filename):
         target_path = target_filename
         target_dir = os.path.dirname(target_path)
     else:
-        root = base_dir if base_dir else DATABASE_DIR
         if subfolder:
             target_dir = os.path.join(root, subfolder)
         else:
@@ -287,427 +267,126 @@ def save_and_archive_json(data: Any, target_filename: str, subfolder: Optional[s
             except Exception:
                 pass
 
-    # Mirroring logic for master state & metadata between database/database/ and database/
-    if base_dir is None and not os.path.isabs(target_filename):
-        if base_name in ["master_state.json", "state_metadata.json"]:
-            if str(subfolder).lower() == "database":
-                mirror_path = os.path.join(DATABASE_DIR, base_name)
-            else:
-                mirror_path = os.path.join(DATABASE_SUBDIR, base_name)
-            try:
-                os.makedirs(os.path.dirname(mirror_path), exist_ok=True)
-                with open(mirror_path, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=4)
-            except Exception:
-                pass
-
     return target_path
 
 
 def ensure_workspace_directories():
     """
-    Autonomously verifies, creates, and corrects all workspace folder structures.
-    Enforces:
-      - Root State Files: ONLY master_state.json and state_metadata.json strictly inside database/
-      - checkouts_today.json strictly inside database/check out history/
-      - room_moves_yesterday.json strictly inside database/room moves/
-      - arrivals_today.json strictly inside database/sandy beach/arrivals/
-      - departures_today.json strictly inside database/sandy beach/departures/
-      - today's booking calls JSON strictly inside database/booking calls for today/
-      - automated routing of all domain-specific JSON files into designated subdirectories inside database/
+    Initializes and enforces the canonical centralized directory topology:
+      - DATABASE/HOTEL STATE/master_state.json
+      - DATABASE/HOTEL STATE/state_metadata.json
+      - DATABASE/BOOKING CALLS FOR TODAY/booking_calls_for_today.json
+      - DATABASE/CHECK OUT HISTORY/checkouts.json
+      - DATABASE/ROOM MOVES/room_moves.json
+      - DATABASE/SANDY BEACH/ARRIVALS/today_arrivals.json
+      - DATABASE/SANDY BEACH/DEPARTURE/
+    Cleans up redundant DATABASE/DATABASE/ and legacy mirrors.
     """
     dirs_to_create = [
         DATABASE_DIR,
-        DATABASE_SUBDIR,
-        SANDY_BEACH_DIR,
-        SANDY_BEACH_ARRIVALS_DIR,
-        SANDY_BEACH_DEPARTURES_DIR,
-        SANDY_VILLAS_DIR,
-        SANDY_VILLAS_ARRIVALS_DIR,
-        SANDY_VILLAS_DEPARTURES_DIR,
+        HOTEL_STATE_DIR,
+        BOOKING_CALLS_TODAY_DIR,
         CHECKOUT_HISTORY_DIR,
         ROOM_MOVES_DIR,
+        SANDY_BEACH_DIR,
+        SANDY_BEACH_ARRIVALS_DIR,
+        SANDY_BEACH_DEPARTURE_DIR,
         TEMPLATES_DIR,
-        os.path.join(TEMPLATES_DIR, "booking calls template"),
-        os.path.join(TEMPLATES_DIR, "check memo template"),
-        os.path.join(TEMPLATES_DIR, "cake memo template"),
-        os.path.join(TEMPLATES_DIR, "offer list template"),
+        os.path.join(TEMPLATES_DIR, "BOOKING CALLS TEMPLATE"),
+        os.path.join(TEMPLATES_DIR, "CAKE MEMO TEMPLATE"),
+        os.path.join(TEMPLATES_DIR, "OFFER LIST TEMPLATE"),
         OUTPUT_DIR,
-        os.path.join(OUTPUT_DIR, "offers"),
+        os.path.join(OUTPUT_DIR, "OFFERS"),
+        os.path.join(OUTPUT_DIR, "CAKE_MEMOS"),
         TODAYS_LIST_DIR,
         TRASH_DIR,
-        BOOKING_CALLS_DIR,
-        BOOKING_CALLS_TODAY_DIR
+        BOOKING_CALLS_DIR
     ]
     for d in dirs_to_create:
         os.makedirs(d, exist_ok=True)
 
-    # 1. State files strictly inside database/database/ and mirrored to database/ root
-    root_master = os.path.join(BASE_DIR, "master_state.json")
-    if os.path.exists(root_master):
-        try:
-            if not os.path.exists(MASTER_STATE_PATH):
-                shutil.move(root_master, MASTER_STATE_PATH)
-            else:
-                os.remove(root_master)
-        except Exception:
-            pass
+    # 1. Clean up redundant DATABASE/DATABASE/ if present
+    redundant_db = os.path.join(DATABASE_DIR, "DATABASE")
+    if os.path.exists(redundant_db):
+        safe_rmtree(redundant_db)
 
-    root_meta = os.path.join(BASE_DIR, "state_metadata.json")
-    if os.path.exists(root_meta):
-        try:
-            if not os.path.exists(STATE_META_PATH):
-                shutil.move(root_meta, STATE_META_PATH)
-            else:
-                os.remove(root_meta)
-        except Exception:
-            pass
-
-    # Ensure master_state.json exists and contains a valid bookings dict
-    master_data = {}
-    for cand in [MASTER_STATE_PATH, MASTER_STATE_ROOT_PATH]:
-        if os.path.exists(cand):
+    # 2. Clean up redundant mirror files in DATABASE/ root
+    for rf_name in ["master_state.json", "state_metadata.json"]:
+        rf = os.path.join(DATABASE_DIR, rf_name)
+        if os.path.exists(rf):
             try:
-                with open(cand, "r", encoding="utf-8") as f:
-                    d = json.load(f)
-                if isinstance(d, dict) and "title" not in d:
-                    master_data = d
-                    break
-            except Exception:
-                pass
-    save_and_archive_json(master_data, "master_state.json", subfolder="database")
-    save_and_archive_json(master_data, "master_state.json", subfolder=None)
-
-    # Ensure state_metadata.json exists and contains valid metadata
-    meta_data = {
-        "last_processed_date": None,
-        "last_updated_at": None,
-        "total_bookings": len(master_data)
-    }
-    for cand in [STATE_META_PATH, STATE_META_ROOT_PATH]:
-        if os.path.exists(cand):
-            try:
-                with open(cand, "r", encoding="utf-8") as f:
-                    d = json.load(f)
-                if isinstance(d, dict) and "title" not in d:
-                    meta_data = d
-                    break
-            except Exception:
-                pass
-    save_and_archive_json(meta_data, "state_metadata.json", subfolder="database")
-    save_and_archive_json(meta_data, "state_metadata.json", subfolder=None)
-
-    # 3. checkouts_today.json strictly inside database/check out history/
-    legacy_checkouts = [
-        os.path.join(CHECKOUT_HISTORY_DIR, "checkouts_today.json"),
-        os.path.join(CHECKOUT_HISTORY_DIR, "check_out_history.json"),
-        os.path.join(CHECKOUT_HISTORY_DIR, "checkout_history.json"),
-        os.path.join(DATABASE_DIR, "checkout_history.json"),
-        os.path.join(DATABASE_DIR, "check_out_history.json"),
-        os.path.join(BASE_DIR, "check_out_history.json"),
-        os.path.join(BASE_DIR, "checkout_history.json"),
-        os.path.join(DATABASE_DIR, "CHECK OUT HISTORY", "check_out_history.json"),
-        os.path.join(DATABASE_DIR, "CHECK OUT HISTORY", "checkout_history.json"),
-        os.path.join(DATABASE_DIR, "CHECKOUT HISTORY", "check_out_history.json"),
-        os.path.join(DATABASE_DIR, "CHECKOUT HISTORY", "checkout_history.json")
-    ]
-    co_records = []
-    for src in legacy_checkouts:
-        if os.path.exists(src):
-            try:
-                with open(src, "r", encoding="utf-8") as f:
-                    src_data = json.load(f)
-                if isinstance(src_data, list):
-                    for item in src_data:
-                        if isinstance(item, dict):
-                            if "property" not in item:
-                                item["property"] = DEFAULT_PROPERTY
-                            co_records.append(item)
-                elif isinstance(src_data, dict) and "records" in src_data:
-                    for item in src_data["records"]:
-                        if isinstance(item, dict):
-                            if "property" not in item:
-                                item["property"] = DEFAULT_PROPERTY
-                            co_records.append(item)
-                if os.path.abspath(src) != os.path.abspath(CHECKOUTS_TODAY_JSON) and os.path.exists(src):
-                    try:
-                        os.remove(src)
-                    except Exception:
-                        pass
-            except Exception as e:
-                print(f"[FileManager] Error consolidating checkout from {src}: {e}")
-
-    co_payload = {
-        "property": DEFAULT_PROPERTY,
-        "last_updated": datetime.now().isoformat(),
-        "total_records": len(co_records),
-        "records": co_records
-    }
-    save_and_archive_json(co_payload, "checkouts_today.json", subfolder="check out history")
-    save_and_archive_json(co_records, "check_out_history.json", subfolder="check out history")
-
-    # 4. room_moves_yesterday.json strictly inside database/room moves/
-    legacy_room_moves = [
-        os.path.join(ROOM_MOVES_DIR, "room_moves_yesterday.json"),
-        os.path.join(ROOM_MOVES_DIR, "room_moves_history.json"),
-        os.path.join(ROOM_MOVES_DIR, "room_moves.json"),
-        os.path.join(DATABASE_DIR, "room_moves_history.json"),
-        os.path.join(DATABASE_DIR, "room_moves.json"),
-        os.path.join(BASE_DIR, "room_moves_history.json"),
-        os.path.join(BASE_DIR, "room_moves.json"),
-        os.path.join(DATABASE_DIR, "ROOM MOVES", "room_moves_history.json"),
-        os.path.join(DATABASE_DIR, "ROOM MOVES", "room_moves.json")
-    ]
-    rm_records = []
-    for src in legacy_room_moves:
-        if os.path.exists(src):
-            try:
-                with open(src, "r", encoding="utf-8") as f:
-                    src_data = json.load(f)
-                if isinstance(src_data, list):
-                    rm_records.extend(src_data)
-                elif isinstance(src_data, dict) and "moves" in src_data:
-                    rm_records.extend(src_data["moves"])
-                if os.path.abspath(src) != os.path.abspath(ROOM_MOVES_YESTERDAY_JSON) and os.path.exists(src):
-                    try:
-                        os.remove(src)
-                    except Exception:
-                        pass
-            except Exception as e:
-                print(f"[FileManager] Error consolidating room moves from {src}: {e}")
-
-    save_and_archive_json(rm_records, "room_moves_yesterday.json", subfolder="room moves")
-    save_and_archive_json(rm_records, "room_moves_history.json", subfolder="room moves")
-
-    # 5. Route today's booking calls JSON to database/booking calls for today/
-    legacy_today_locations = [
-        os.path.join(BASE_DIR, "booking calls for today", "booking_calls_today.json"),
-        os.path.join(BASE_DIR, "booking_calls_today.json"),
-        os.path.join(BOOKING_CALLS_DIR, "booking_calls_today.json"),
-        os.path.join(DATABASE_DIR, "booking_calls_today.json"),
-        os.path.join(DATABASE_DIR, "BOOKING CALLS FOR TODAY", "booking_calls_today.json")
-    ]
-    for loc in legacy_today_locations:
-        if os.path.exists(loc) and os.path.abspath(loc).lower() != os.path.abspath(BOOKING_CALLS_TODAY_JSON).lower():
-            try:
-                if not os.path.exists(BOOKING_CALLS_TODAY_JSON):
-                    shutil.move(loc, BOOKING_CALLS_TODAY_JSON)
-                else:
-                    os.remove(loc)
+                os.remove(rf)
             except Exception:
                 pass
 
-    misplaced_bcom_state = [
-        os.path.join(BASE_DIR, "booking_calls_state.json"),
-        os.path.join(DATABASE_DIR, "booking_calls_state.json"),
-        os.path.join(BOOKING_CALLS_DIR, "booking_calls_state.json"),
-        os.path.join(DATABASE_DIR, "BOOKING CALLS FOR TODAY", "booking_calls_state.json")
-    ]
-    for loc in misplaced_bcom_state:
-        if os.path.exists(loc) and os.path.abspath(loc).lower() != os.path.abspath(BOOKING_CALLS_STATE_PATH).lower():
-            try:
-                if not os.path.exists(BOOKING_CALLS_STATE_PATH):
-                    shutil.move(loc, BOOKING_CALLS_STATE_PATH)
-                else:
-                    os.remove(loc)
-            except Exception:
-                pass
+    # 3. Ensure master_state.json
+    if not os.path.exists(MASTER_STATE_PATH):
+        save_and_archive_json({}, "master_state.json", subfolder="HOTEL STATE")
 
-    if os.path.exists(BOOKING_CALLS_STATE_PATH):
-        try:
-            with open(BOOKING_CALLS_STATE_PATH, "r", encoding="utf-8") as f:
-                bcs_data = json.load(f)
-            if not isinstance(bcs_data, dict):
-                save_and_archive_json({}, "booking_calls_state.json", subfolder="booking calls for today")
-        except Exception:
-            save_and_archive_json({}, "booking_calls_state.json", subfolder="booking calls for today")
-    else:
-        save_and_archive_json({}, "booking_calls_state.json", subfolder="booking calls for today")
-
-    if os.path.exists(BOOKING_CALLS_TODAY_JSON):
-        try:
-            with open(BOOKING_CALLS_TODAY_JSON, "r", encoding="utf-8") as f:
-                bct_data = json.load(f)
-            if not isinstance(bct_data, list):
-                save_and_archive_json([], "booking_calls_today.json", subfolder="booking calls for today")
-        except Exception:
-            save_and_archive_json([], "booking_calls_today.json", subfolder="booking calls for today")
-    else:
-        save_and_archive_json([], "booking_calls_today.json", subfolder="booking calls for today")
-
-    # 6. Route Sandy Beach arrivals & departures
-    misplaced_beach = [
-        os.path.join(BASE_DIR, "arrivals_sandy_beach.json"),
-        os.path.join(BASE_DIR, "arrivals.json"),
-        os.path.join(DATABASE_DIR, "arrivals_sandy_beach.json"),
-        os.path.join(DATABASE_DIR, "SANDY BEACH ARRIVALS", "arrivals_sandy_beach.json"),
-        os.path.join(SANDY_BEACH_DIR, "arrivals.json"),
-        os.path.join(SANDY_BEACH_ARRIVALS_DIR, "arrivals.json"),
-        os.path.join(SANDY_BEACH_ARRIVALS_DIR, "arrivals_sandy_beach.json")
-    ]
-    beach_data = {}
-    for p in misplaced_beach:
-        if os.path.exists(p):
-            try:
-                with open(p, "r", encoding="utf-8") as f:
-                    d = json.load(f)
-                if isinstance(d, dict) and not beach_data:
-                    beach_data = d
-            except Exception:
-                pass
-    if os.path.exists(ARRIVALS_BEACH_PATH):
-        try:
-            with open(ARRIVALS_BEACH_PATH, "r", encoding="utf-8") as f:
-                d = json.load(f)
-            if isinstance(d, dict) and d:
-                beach_data = d
-        except Exception:
-            pass
-
-    save_and_archive_json(beach_data, "arrivals_today.json", subfolder="sandy beach/arrivals")
-    save_and_archive_json(beach_data, "arrivals.json", subfolder="sandy beach/arrivals")
-
-    # Initialize Sandy Beach departures_today.json if missing
-    if not os.path.exists(DEPARTURES_BEACH_PATH):
-        dep_init = {
-            "property": "sandy_beach",
-            "date": date.today().strftime("%Y-%m-%d"),
-            "total_departures": 0,
-            "departures": []
+    # 4. Ensure state_metadata.json
+    if not os.path.exists(STATE_META_PATH):
+        meta_payload = {
+            "last_sync_date": None,
+            "last_updated_at": None,
+            "total_bookings": 0
         }
-        save_and_archive_json(dep_init, "departures_today.json", subfolder="sandy beach/departures")
+        save_and_archive_json(meta_payload, "state_metadata.json", subfolder="HOTEL STATE")
 
-    # 7. Route Sandy Villas arrivals & departures
-    misplaced_villas = [
-        os.path.join(BASE_DIR, "arrivals_sandy_villas.json"),
-        os.path.join(DATABASE_DIR, "arrivals_sandy_villas.json"),
-        os.path.join(DATABASE_DIR, "SANDY VILLAS ARRIVALS", "arrivals_sandy_villas.json"),
-        os.path.join(SANDY_VILLAS_DIR, "arrivals.json"),
-        os.path.join(SANDY_VILLAS_ARRIVALS_DIR, "arrivals.json"),
-        os.path.join(SANDY_VILLAS_ARRIVALS_DIR, "arrivals_sandy_villas.json")
-    ]
-    villas_data = {}
-    for p in misplaced_villas:
-        if os.path.exists(p):
-            try:
-                with open(p, "r", encoding="utf-8") as f:
-                    d = json.load(f)
-                if isinstance(d, dict) and not villas_data:
-                    villas_data = d
-            except Exception:
-                pass
-    if os.path.exists(ARRIVALS_VILLAS_PATH):
-        try:
-            with open(ARRIVALS_VILLAS_PATH, "r", encoding="utf-8") as f:
-                d = json.load(f)
-            if isinstance(d, dict) and d:
-                villas_data = d
-        except Exception:
-            pass
+    # 5. Ensure checkouts.json
+    if not os.path.exists(CHECKOUTS_JSON):
+        save_and_archive_json([], "checkouts.json", subfolder="CHECK OUT HISTORY")
 
-    save_and_archive_json(villas_data, "arrivals_today.json", subfolder="sandy villas/arrivals")
-    save_and_archive_json(villas_data, "arrivals.json", subfolder="sandy villas/arrivals")
+    # 6. Ensure room_moves.json
+    if not os.path.exists(ROOM_MOVES_JSON):
+        save_and_archive_json([], "room_moves.json", subfolder="ROOM MOVES")
 
-    # Initialize Sandy Villas departures_today.json if missing
-    if not os.path.exists(DEPARTURES_VILLAS_PATH):
-        villas_dep_init = {
-            "property": "sandy_villas",
-            "date": date.today().strftime("%Y-%m-%d"),
-            "total_departures": 0,
-            "departures": []
-        }
-        save_and_archive_json(villas_dep_init, "departures_today.json", subfolder="sandy villas/departures")
+    # 7. Ensure booking_calls_for_today.json
+    if not os.path.exists(BOOKING_CALLS_TODAY_JSON):
+        save_and_archive_json([], "booking_calls_for_today.json", subfolder="BOOKING CALLS FOR TODAY")
 
-    # 8. Strictly enforce that only master_state.json and state_metadata.json reside in database/ root
-    for item in os.listdir(DATABASE_DIR):
-        item_path = os.path.join(DATABASE_DIR, item)
-        if os.path.isfile(item_path) and item.endswith(".json"):
-            if item not in {"master_state.json", "state_metadata.json"}:
-                try:
-                    with open(item_path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    save_and_archive_json(data, item)  # automatically routes to designated subfolder
-                    os.remove(item_path)
-                except Exception:
-                    pass
-
-
-def cleanup_obsolete_python_files(workspace_dir: str = BASE_DIR) -> List[str]:
-    """
-    Autonomous cleanup routine:
-    Scans the workspace and safely removes unused, obsolete, or temporary Python (.py)
-    files that are not part of the active application manifest.
-    """
-    deleted_files = []
-    ignore_dirs = {".git", ".venv", "venv", "env", "__pycache__"}
-
-    for root, dirs, files in os.walk(workspace_dir):
-        # Skip version control and virtual envs
-        dirs[:] = [d for d in dirs if d not in ignore_dirs]
-        for f in files:
-            if f.endswith(".py"):
-                if f not in ACTIVE_PYTHON_WHITELIST:
-                    full_path = os.path.join(root, f)
-                    try:
-                        os.remove(full_path)
-                        deleted_files.append(full_path)
-                    except Exception as e:
-                        print(f"[Cleanup] Could not remove {full_path}: {e}")
-    return deleted_files
-
-
-# Guard flag: ensure workspace setup only runs once per process
-_workspace_initialized = False
+    # 8. Ensure today_arrivals.json for Sandy Beach
+    if not os.path.exists(ARRIVALS_BEACH_PATH):
+        save_and_archive_json({}, "today_arrivals.json", subfolder="SANDY BEACH/ARRIVALS")
 
 
 class InHouseDataManager:
     """
-    Core data engine for In-House and Arrivals list ingestion, state management,
-    room-move detection, and file cleanup.
+    Main Data Manager Engine:
+      - Ingests In-House and Arrivals CSV exports for Sandy Beach.
+      - Maintains master_state.json and state_metadata.json in DATABASE/HOTEL STATE/.
+      - Detects room moves while strictly classifying and excluding room merges.
+      - Detects check-outs and records them into checkouts.json.
+      - Enforces Gatekeeper sequential in-house synchronization.
     """
 
-    EXCLUDED_COLUMNS = {"τύπος γεύματος", "τυποσ γευματοσ", "meal plan", "mealplan"}
-    BOOKING_ID_KEYS = ["Αρ.", "Αρ", "Booking ID", "BookingID", "Reservation No"]
-    GUEST_NAME_KEYS = ["Πελάτης", "Πελατης", "Guest Name", "Guest", "Name"]
-    ROOM_KEYS = ["Δωμάτιο", "Δωματιο", "Room", "Room No", "RoomNo"]
+    BOOKING_ID_KEYS = ["Αρ.", "Αρ", "Booking ID", "Reservation ID", "Res ID", "Αριθμός Κράτησης"]
+    ROOM_KEYS = ["Δωμάτιο", "Room", "Room No", "Room Number", "Δωμ."]
+    GUEST_NAME_KEYS = ["Πελάτης", "Guest", "Guest Name", "Όνομα Πελάτη"]
+    ARRIVAL_KEYS = ["Άφιξη", "Arrival", "Arr Date"]
+    DEPARTURE_KEYS = ["Αναχώρηση", "Departure", "Dep Date"]
+    EXCLUDED_COLUMNS = ["τύπος γεύματος", "meal plan", "meal", "γεύμα"]
 
-    def __init__(self, master_state_path: str = MASTER_STATE_PATH,
-                 state_meta_path: str = STATE_META_PATH,
-                 arrivals_state_path: str = ARRIVALS_STATE_PATH,
-                 trash_dir: str = TRASH_DIR):
-        global _workspace_initialized
-        if not _workspace_initialized:
-            ensure_workspace_directories()
-            _workspace_initialized = True
+    def __init__(
+        self,
+        master_state_path: str = MASTER_STATE_PATH,
+        state_meta_path: str = STATE_META_PATH,
+        arrivals_state_path: str = ARRIVALS_BEACH_PATH,
+        trash_dir: str = TRASH_DIR
+    ):
+        ensure_workspace_directories()
         self.master_state_path = os.path.abspath(master_state_path)
         self.state_meta_path = os.path.abspath(state_meta_path)
         self.arrivals_state_path = os.path.abspath(arrivals_state_path)
         self.trash_dir = os.path.abspath(trash_dir)
 
     # -------------------------------------------------------------------------
-    # In-House State Persistence (master_state.json inside DATABASE/ directory)
+    # In-House State Persistence (HOTEL STATE/master_state.json)
     # -------------------------------------------------------------------------
     def load_master_state(self) -> Dict[str, Dict[str, Any]]:
-        """Loads master_state.json from DATABASE/DATABASE/ or DATABASE/ directory."""
-        if self.master_state_path not in [os.path.abspath(MASTER_STATE_PATH), os.path.abspath(MASTER_STATE_ROOT_PATH)]:
-            if not os.path.exists(self.master_state_path):
-                return {}
-            target = self.master_state_path
-        else:
-            candidates = [
-                self.master_state_path,
-                MASTER_STATE_PATH,
-                MASTER_STATE_ROOT_PATH,
-                os.path.join(BASE_DIR, "master_state.json")
-            ]
-            target = None
-            for c in candidates:
-                if os.path.exists(c):
-                    target = c
-                    break
-        if not target or not os.path.exists(target):
+        """Loads master_state.json from DATABASE/HOTEL STATE/master_state.json."""
+        target = self.master_state_path
+        if not os.path.exists(target):
             return {}
-
         try:
             with open(target, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -719,162 +398,95 @@ class InHouseDataManager:
             return {}
 
     def save_master_state(self, state: Dict[str, Dict[str, Any]]):
-        """Atomically saves the active in-house guests to master_state.json inside DATABASE/DATABASE/ and mirrors to DATABASE/."""
-        if self.master_state_path in [os.path.abspath(MASTER_STATE_PATH), os.path.abspath(MASTER_STATE_ROOT_PATH)]:
-            save_and_archive_json(state, "master_state.json", subfolder="database")
-            save_and_archive_json(state, "master_state.json", subfolder=None)
-        else:
-            save_and_archive_json(state, self.master_state_path)
+        """Atomically saves the active in-house guests to DATABASE/HOTEL STATE/master_state.json."""
+        save_and_archive_json(state, self.master_state_path)
 
     def load_metadata(self) -> Dict[str, Any]:
-        """Loads state metadata (last_processed_date, timestamps, etc.) from DATABASE/DATABASE/ or DATABASE/."""
-        if self.state_meta_path not in [os.path.abspath(STATE_META_PATH), os.path.abspath(STATE_META_ROOT_PATH)]:
-            if not os.path.exists(self.state_meta_path):
-                return {}
-            target = self.state_meta_path
-        else:
-            candidates = [
-                self.state_meta_path,
-                STATE_META_PATH,
-                STATE_META_ROOT_PATH,
-                os.path.join(BASE_DIR, "state_metadata.json")
-            ]
-            target = None
-            for c in candidates:
-                if os.path.exists(c):
-                    target = c
-                    break
-        if not target or not os.path.exists(target):
-            return {}
-
+        """Loads system metadata (last_sync_date, last_updated_at, total_bookings)."""
+        target = self.state_meta_path
+        if not os.path.exists(target):
+            return {"last_sync_date": None, "last_updated_at": None, "total_bookings": 0}
         try:
             with open(target, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict):
+                    # Ensure last_sync_date is normalized
+                    if "last_sync_date" not in data and "last_processed_date" in data:
+                        data["last_sync_date"] = data["last_processed_date"]
                     return data
         except Exception:
             pass
-        return {}
+        return {"last_sync_date": None, "last_updated_at": None, "total_bookings": 0}
 
     def save_metadata(self, meta: Dict[str, Any]):
-        """Persists state metadata to DATABASE/DATABASE/ and mirrors to DATABASE/."""
-        if self.state_meta_path in [os.path.abspath(STATE_META_PATH), os.path.abspath(STATE_META_ROOT_PATH)]:
-            save_and_archive_json(meta, "state_metadata.json", subfolder="database")
-            save_and_archive_json(meta, "state_metadata.json", subfolder=None)
-        else:
-            save_and_archive_json(meta, self.state_meta_path)
+        """Persists system metadata to DATABASE/HOTEL STATE/state_metadata.json."""
+        save_and_archive_json(meta, self.state_meta_path)
 
-    def get_last_processed_date(self) -> Optional[date]:
-        """Returns the date of the last ingested in-house CSV, or None if brand new."""
+    def get_last_sync_date(self) -> Optional[date]:
+        """Returns the last synchronized in-house date, or None if no synchronization has occurred."""
         meta = self.load_metadata()
-        last_str = meta.get("last_processed_date")
+        last_str = meta.get("last_sync_date") or meta.get("last_processed_date")
         if last_str:
-            try:
-                return datetime.strptime(last_str, "%Y-%m-%d").date()
-            except ValueError:
-                pass
+            for fmt in ["%Y-%m-%d", "%d/%m/%Y"]:
+                try:
+                    return datetime.strptime(last_str, fmt).date()
+                except ValueError:
+                    pass
         return None
 
-    def set_last_processed_date(self, target_date: date):
-        """Updates last_processed_date in metadata."""
+    # Backward compatibility alias
+    get_last_processed_date = get_last_sync_date
+
+    def set_last_sync_date(self, target_date: date):
+        """Updates last_sync_date, last_updated_at, and total_bookings in state_metadata.json."""
         meta = self.load_metadata()
+        meta["last_sync_date"] = target_date.strftime("%Y-%m-%d")
         meta["last_processed_date"] = target_date.strftime("%Y-%m-%d")
         meta["last_updated_at"] = datetime.now().isoformat()
+        master = self.load_master_state()
+        meta["total_bookings"] = len(master)
         self.save_metadata(meta)
 
+    # Backward compatibility alias
+    set_last_processed_date = set_last_sync_date
+
     # -------------------------------------------------------------------------
-    # Arrivals & Departures State Persistence (Automated Routing to Designated Folders)
+    # Arrivals & Departures State Persistence
     # -------------------------------------------------------------------------
     def load_arrivals_state(self) -> Dict[str, Any]:
-        """Loads arrivals state from designated property folders (arrivals_today.json)."""
+        """Loads arrivals state for Sandy Beach from today_arrivals.json."""
         beach_data = {}
-        beach_candidates = [
-            ARRIVALS_BEACH_PATH,
-            os.path.join(SANDY_BEACH_ARRIVALS_DIR, "arrivals.json"),
-            os.path.join(SANDY_BEACH_ARRIVALS_DIR, "arrivals_sandy_beach.json"),
-            os.path.join(SANDY_BEACH_DIR, "arrivals.json"),
-            os.path.join(DATABASE_DIR, "arrivals_sandy_beach.json")
-        ]
-        for p in beach_candidates:
-            if os.path.exists(p):
-                try:
-                    with open(p, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    if isinstance(data, dict):
-                        beach_data = data
-                        break
-                except Exception:
-                    pass
-
-        villas_data = {}
-        villas_candidates = [
-            ARRIVALS_VILLAS_PATH,
-            os.path.join(SANDY_VILLAS_ARRIVALS_DIR, "arrivals.json"),
-            os.path.join(SANDY_VILLAS_ARRIVALS_DIR, "arrivals_sandy_villas.json"),
-            os.path.join(SANDY_VILLAS_DIR, "arrivals.json"),
-            os.path.join(DATABASE_DIR, "arrivals_sandy_villas.json")
-        ]
-        for p in villas_candidates:
-            if os.path.exists(p):
-                try:
-                    with open(p, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    if isinstance(data, dict):
-                        villas_data = data
-                        break
-                except Exception:
-                    pass
-
-        # If custom arrivals_state_path passed and exists (e.g. in test), load it
-        if os.path.exists(self.arrivals_state_path) and os.path.basename(self.arrivals_state_path) not in ["arrivals.json", "arrivals_today.json"]:
+        target = self.arrivals_state_path
+        if os.path.exists(target):
             try:
-                with open(self.arrivals_state_path, "r", encoding="utf-8") as f:
-                    custom_data = json.load(f)
-                    if isinstance(custom_data, dict):
-                        if "SANDY BEACH" in custom_data:
-                            beach_data = custom_data["SANDY BEACH"]
-                        if "SANDY VILLAS" in custom_data:
-                            villas_data = custom_data["SANDY VILLAS"]
+                with open(target, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    beach_data = data
             except Exception:
                 pass
 
-        return {
+        res = {
             "_metadata": {
                 "last_updated": datetime.now().isoformat(),
                 "total_beach": len(beach_data),
-                "total_villas": len(villas_data)
+                "total_arrivals": len(beach_data)
             },
-            "SANDY BEACH": beach_data,
-            "SANDY VILLAS": villas_data
+            "SANDY BEACH": beach_data
         }
+        villas_cache = getattr(self, "_villas_arrivals_cache", None)
+        if villas_cache is not None:
+            res["SANDY VILLAS"] = villas_cache
+        return res
 
     def save_arrivals_state(self, arrivals_data: Dict[str, Any]):
-        """
-        Autonomously routes arrivals into designated folders:
-          - Sandy Beach arrivals -> database/sandy beach/arrivals/arrivals_today.json
-                                 &  database/sandy beach/arrivals/arrivals.json
-          - Sandy Villas arrivals -> database/sandy villas/arrivals/arrivals_today.json
-                                 &  database/sandy villas/arrivals/arrivals.json
-        """
-        ensure_workspace_directories()
-
-        beach_data = arrivals_data.get("SANDY BEACH", {})
-        save_and_archive_json(beach_data, "arrivals_today.json", subfolder="sandy beach/arrivals")
-        save_and_archive_json(beach_data, "arrivals.json", subfolder="sandy beach/arrivals")
-        save_and_archive_json(beach_data, "arrivals_sandy_beach.json", subfolder="sandy beach/arrivals")
-
-        villas_data = arrivals_data.get("SANDY VILLAS", {})
-        save_and_archive_json(villas_data, "arrivals_today.json", subfolder="sandy villas/arrivals")
-        save_and_archive_json(villas_data, "arrivals.json", subfolder="sandy villas/arrivals")
-        save_and_archive_json(villas_data, "arrivals_sandy_villas.json", subfolder="sandy villas/arrivals")
-
-        # If custom arrivals_state_path was passed in constructor, also persist to it
-        if os.path.basename(self.arrivals_state_path) not in ["arrivals.json", "arrivals_today.json"]:
-            save_and_archive_json(arrivals_data, self.arrivals_state_path)
+        """Persists Sandy Beach arrivals into today_arrivals.json."""
+        beach_data = arrivals_data.get("SANDY BEACH", arrivals_data)
+        save_and_archive_json(beach_data, self.arrivals_state_path)
 
     def load_departures_state(self, property_name: str = DEFAULT_PROPERTY) -> Dict[str, Any]:
-        """Loads departures state from database/<property>/departures/departures_today.json."""
-        target_path = get_property_departures_path(property_name)
+        """Loads departures state from DATABASE/SANDY BEACH/DEPARTURE/departures_today.json."""
+        target_path = DEPARTURES_BEACH_PATH
         if os.path.exists(target_path):
             try:
                 with open(target_path, "r", encoding="utf-8") as f:
@@ -884,71 +496,65 @@ class InHouseDataManager:
             except Exception:
                 pass
         return {
-            "property": property_name,
+            "property": "sandy_beach",
             "date": date.today().strftime("%Y-%m-%d"),
             "total_departures": 0,
             "departures": []
         }
 
     def save_departures_state(self, departures_data: Dict[str, Any], property_name: str = DEFAULT_PROPERTY):
-        """Saves departures state into database/<property>/departures/departures_today.json."""
-        norm_prop = property_name.lower().replace("_", " ")
-        subfolder = f"{norm_prop}/departures"
-        save_and_archive_json(departures_data, "departures_today.json", subfolder=subfolder)
+        """Saves departures state into DATABASE/SANDY BEACH/DEPARTURE/departures_today.json."""
+        save_and_archive_json(departures_data, DEPARTURES_BEACH_PATH)
 
     def load_checkouts_history(self) -> Dict[str, Any]:
-        """Loads checkout history from database/check out history/checkouts_today.json."""
-        for p in [CHECKOUTS_TODAY_JSON, os.path.join(CHECKOUT_HISTORY_DIR, "check_out_history.json")]:
-            if os.path.exists(p):
-                try:
-                    with open(p, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                        if isinstance(data, dict) and "records" in data:
-                            return data
-                        elif isinstance(data, list):
-                            return {
-                                "property": DEFAULT_PROPERTY,
-                                "last_updated": datetime.now().isoformat(),
-                                "total_records": len(data),
-                                "records": data
-                            }
-                except Exception:
-                    pass
+        """Loads checkout records from DATABASE/CHECK OUT HISTORY/checkouts.json."""
+        target = CHECKOUTS_JSON
+        records = []
+        if os.path.exists(target):
+            try:
+                with open(target, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        records = data
+                    elif isinstance(data, dict) and "records" in data:
+                        records = data["records"]
+            except Exception:
+                records = []
+
         return {
             "property": DEFAULT_PROPERTY,
-            "last_updated": None,
-            "total_records": 0,
-            "records": []
+            "last_updated": datetime.now().isoformat(),
+            "total_records": len(records),
+            "records": records
         }
 
     def load_room_moves_history(self) -> List[Dict[str, Any]]:
-        """Loads room moves from database/room moves/room_moves_yesterday.json."""
-        for p in [ROOM_MOVES_YESTERDAY_JSON, os.path.join(ROOM_MOVES_DIR, "room_moves_history.json")]:
-            if os.path.exists(p):
-                try:
-                    with open(p, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                        if isinstance(data, list):
-                            return data
-                        elif isinstance(data, dict) and "moves" in data:
-                            return data["moves"]
-                except Exception:
-                    pass
+        """Loads room moves from DATABASE/ROOM MOVES/room_moves.json."""
+        target = ROOM_MOVES_JSON
+        if os.path.exists(target):
+            try:
+                with open(target, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        return data
+                    elif isinstance(data, dict) and "moves" in data:
+                        return data["moves"]
+            except Exception:
+                pass
         return []
-
 
     # -------------------------------------------------------------------------
     # Gatekeeper Missing Dates Calculation
     # -------------------------------------------------------------------------
     def get_missing_dates(self, reference_date: Optional[date] = None) -> List[date]:
         """
-        Determines sequential calendar dates from the day after last_processed_date
+        Determines sequential calendar dates from the day after last_sync_date
         up to reference_date (defaults to today).
         """
         if reference_date is None:
             reference_date = date.today()
 
-        last_date = self.get_last_processed_date()
+        last_date = self.get_last_sync_date()
         master_state = self.load_master_state()
 
         if last_date is None or not master_state:
@@ -1001,9 +607,6 @@ class InHouseDataManager:
 
         return detected_enc, delimiter
 
-    # -------------------------------------------------------------------------
-    # In-House CSV Parsing Engine
-    # -------------------------------------------------------------------------
     def parse_in_house_csv(self, file_path: str) -> Dict[str, Dict[str, Any]]:
         """
         Parses an in-house list CSV file.
@@ -1035,7 +638,19 @@ class InHouseDataManager:
                     )
                     if is_header:
                         header = cleaned_row
-                    continue
+                        continue
+
+                    # Fallback for headerless In-House CSV exports (Room in col 0, Date in col 2, Booking ID in col 7 or 9)
+                    if len(cleaned_row) >= 8 and re.match(r"^\d{3,4}$", cleaned_row[0]) and re.search(r"\d{1,2}/\d{1,2}/\d{2,4}", cleaned_row[2]):
+                        if len(cleaned_row) > 7 and cleaned_row[7].isdigit():
+                            header = ["Δωμάτιο", "Πελάτης", "Άφιξη", "Αναχώρηση", "Τύπος Δωμ", "Κρατηθείς Τύπος", "Χρεώστης", "Αρ.", "Τύπος Γεύματος", "Αγορά", "Αρ. Ενηλ"]
+                        elif len(cleaned_row) > 9 and cleaned_row[9].isdigit():
+                            header = ["Δωμάτιο", "Πελάτης", "Άφιξη", "Αναχώρηση", "Τύπος Δωμ", "Κρατηθείς Τύπος", "Χρεώστης", "col7", "col8", "Αρ.", "Τύπος Γεύματος", "Αγορά", "Αρ. Ενηλ"]
+                        if header:
+                            while len(header) < len(cleaned_row):
+                                header.append(f"col_{len(header)}")
+                    else:
+                        continue
 
                 if not any(cleaned_row):
                     continue
@@ -1096,52 +711,21 @@ class InHouseDataManager:
     # Alias for backward compatibility
     parse_isws_csv = parse_in_house_csv
 
-    # -------------------------------------------------------------------------
-    # Arrivals CSV Parsing Engine (Beach & Villas)
-    # -------------------------------------------------------------------------
     def detect_property_from_file(self, file_path: str) -> str:
-        """
-        Auto-detects whether the arrivals CSV belongs to SANDY VILLAS or SANDY BEACH.
-        """
-        filename_upper = os.path.basename(file_path).upper()
-        if "VILLA" in filename_upper:
-            return "SANDY VILLAS"
-        if "BEACH" in filename_upper:
-            return "SANDY BEACH"
-
-        try:
-            encoding, delimiter = self._detect_encoding_and_delimiter(file_path)
-            with open(file_path, mode="r", encoding=encoding, errors="ignore") as f:
-                reader = csv.reader(f, delimiter=delimiter)
-                for i, row in enumerate(reader):
-                    if i > 40:
-                        break
-                    if not row:
-                        continue
-                    col_0 = row[0].strip().strip('"\'')
-                    if col_0.isdigit():
-                        if len(col_0) == 3:
-                            return "SANDY VILLAS"
-                        if len(col_0) == 4:
-                            return "SANDY BEACH"
-        except Exception:
-            pass
-
+        """Auto-detects property. Standardized to SANDY BEACH."""
         return "SANDY BEACH"
 
     def parse_arrivals_csv(self, file_path: str, property_name: Optional[str] = None) -> Tuple[str, Dict[str, Dict[str, Any]]]:
         """
-        Parses a hotel Arrivals CSV export.
-        Returns: (detected_property, arrivals_dict_keyed_by_booking_id)
+        Parses hotel Arrivals CSV export.
+        Returns: (detected_property_name, arrivals_dict_keyed_by_booking_id)
         """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        if not property_name:
-            property_name = self.detect_property_from_file(file_path)
-
         encoding, delimiter = self._detect_encoding_and_delimiter(file_path)
         arrivals: Dict[str, Dict[str, Any]] = {}
+        detected_prop = property_name.upper().replace("_", " ") if property_name else ("SANDY VILLAS" if "VILLAS" in os.path.basename(file_path).upper() else "SANDY BEACH")
 
         with open(file_path, mode="r", encoding=encoding, errors="replace") as f:
             rows = list(csv.reader(f, delimiter=delimiter))
@@ -1149,130 +733,93 @@ class InHouseDataManager:
         row_count = len(rows)
         r = 0
         while r < row_count:
-            row = [c.strip().strip('"\'') for c in rows[r]]
-            next_row = [c.strip().strip('"\'') for c in rows[r + 1]] if (r + 1) < row_count else []
-
-            if not any(row):
+            row = rows[r]
+            if not row or not any(row):
                 r += 1
                 continue
 
-            is_header = any(c.lower() in ["room", "δωμάτιο", "booking id", "αρ.", "guest", "πελάτης"] for c in row)
-            if is_header:
-                r += 1
-                continue
+            cleaned_row = [cell.strip().strip('"\'') for cell in row]
+            col_0 = cleaned_row[0] if len(cleaned_row) > 0 else ""
 
-            col_room = row[0] if len(row) > 0 else ""
-            col_guest = row[2] if len(row) > 2 else ""
-            col_dep = row[4] if len(row) > 4 else ""
-            col_booking_id = row[5] if len(row) > 5 else ""
-            col_room_type = row[6] if len(row) > 6 else ""
-            col_bill_type = row[7] if len(row) > 7 else ""
-            col_agency = row[8] if len(row) > 8 else ""
-            col_pax = row[9] if len(row) > 9 else "1"
-            col_meal = row[15] if len(row) > 15 else ""
+            # Check if row is a main arrival entry
+            guest_name = cleaned_row[2] if len(cleaned_row) > 2 else ""
+            booking_id = cleaned_row[5] if len(cleaned_row) > 5 else ""
 
-            booking_id = col_booking_id if (col_booking_id and col_booking_id.isdigit()) else ""
-            if not booking_id:
-                for idx in [5, 0, 9, 1, 3]:
-                    if idx < len(row) and row[idx].isdigit() and len(row[idx]) >= 4:
-                        booking_id = row[idx]
+            if not booking_id and len(cleaned_row) > 6:
+                for c_val in cleaned_row[1:]:
+                    if c_val.isdigit() and len(c_val) >= 4:
+                        booking_id = c_val
                         break
 
-            if not booking_id and not col_guest:
-                r += 1
-                continue
+            if guest_name and booking_id:
+                room_no = col_0 if col_0.isdigit() else ""
+                agency = cleaned_row[8] if len(cleaned_row) > 8 else ""
+                arr_dt = cleaned_row[4] if len(cleaned_row) > 4 else ""
+                adults = cleaned_row[9] if len(cleaned_row) > 9 else "1"
+                children = cleaned_row[10] if len(cleaned_row) > 10 else "0"
 
-            if not booking_id:
-                booking_id = f"ARR_{r}"
+                # Check following row for notes or room info (e.g. "was in room 1411")
+                notes = ""
+                if r + 1 < row_count:
+                    next_row = [cell.strip().strip('"\'') for cell in rows[r + 1]]
+                    if next_row and len(next_row) > 0 and not (len(next_row) > 5 and next_row[5].isdigit()):
+                        notes = next_row[0]
+                        if not room_no and "room" in notes.lower():
+                            m = re.search(r"room\s*(\d{3,4})", notes, re.IGNORECASE)
+                            if m:
+                                room_no = m.group(1)
+                        r += 1
 
-            dep_date = col_dep
-            date_match = re.search(r"(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.]?(\d{2,4})?", col_dep)
-            if date_match:
-                d = int(date_match.group(1))
-                m = int(date_match.group(2))
-                y = date_match.group(3) or str(date.today().year)
-                if len(y) == 2:
-                    y = "20" + y
-                dep_date = f"{d:02d}/{m:02d}/{y}"
+                arrivals[booking_id] = {
+                    "booking_id": booking_id,
+                    "room": room_no,
+                    "property": detected_prop,
+                    "guests": [guest_name],
+                    "agency": agency,
+                    "arrival": arr_dt,
+                    "departure": "",
+                    "adults": adults,
+                    "children": children,
+                    "notes": notes
+                }
+            r += 1
 
-            notes = next_row[0] if next_row else ""
+        return detected_prop, arrivals
 
-            room_assigned = col_room
-            if not room_assigned:
-                room_in_notes = re.search(r"room\s*(\d{3,4})", notes, re.IGNORECASE)
-                if room_in_notes:
-                    room_assigned = room_in_notes.group(1)
-
-            arrival_entry = {
-                "booking_id": booking_id,
-                "property": property_name,
-                "room": room_assigned or "Unassigned",
-                "guest_name": col_guest,
-                "departure_date": dep_date,
-                "room_type": col_room_type,
-                "billing_room_type": col_bill_type,
-                "agency": col_agency,
-                "pax": int(re.sub(r"\D", "", col_pax)) if re.search(r"\d", col_pax) else 1,
-                "meal_plan": col_meal,
-                "notes": notes,
-                "imported_at": datetime.now().isoformat()
-            }
-
-            arrivals[booking_id] = arrival_entry
-            r += 2 if (next_row and not any(next_row[1:])) else 1
-
-        return property_name, arrivals
-
-    def update_arrivals_state(self, property_name: str,
-                              arrivals: Dict[str, Dict[str, Any]],
-                              target_date: Optional[date] = None) -> Dict[str, Any]:
-        """
-        Updates arrivals state and routes property files into designated folders.
-        """
-        if target_date is None:
-            target_date = date.today()
-
-        current_arrivals = self.load_arrivals_state()
-        prop_key = property_name.upper()
-        if "VILLA" in prop_key:
-            prop_key = "SANDY VILLAS"
+    def update_arrivals_state(self, property_name: str, arrivals_dict: Dict[str, Dict[str, Any]]):
+        """Updates today_arrivals.json for Sandy Beach and caches Sandy Villas if needed."""
+        norm_prop = property_name.upper().replace("_", " ")
+        if "VILLAS" in norm_prop:
+            self._villas_arrivals_cache = arrivals_dict
         else:
-            prop_key = "SANDY BEACH"
-
-        current_arrivals[prop_key] = arrivals
-        current_arrivals["_metadata"] = {
-            "date": target_date.strftime("%Y-%m-%d"),
-            "last_updated": datetime.now().isoformat(),
-            "total_beach": len(current_arrivals.get("SANDY BEACH", {})),
-            "total_villas": len(current_arrivals.get("SANDY VILLAS", {}))
-        }
-
-        self.save_arrivals_state(current_arrivals)
-        return current_arrivals
+            self.save_arrivals_state({"SANDY BEACH": arrivals_dict})
 
     # -------------------------------------------------------------------------
-    # Comparison Engine & In-House State Synchronizer
+    # Comparison Engine & In-House State Synchronizer with Room Merge Exclusion
     # -------------------------------------------------------------------------
     def compare_and_update(self, new_bookings: Dict[str, Dict[str, Any]],
                            processing_date: date) -> Dict[str, Any]:
         """
         Compares new_bookings against master_state.json.
         Detects:
-          - Room Move (Booking ID exists, but 'Δωμάτιο' changed)
-          - Check-out (Booking ID in master_state, missing from new_bookings)
-          - Check-in (Booking ID not in master_state, present in new_bookings)
-        Updates master_state.json and logs events.
+          - Room Move (Booking ID exists, old_room != new_room).
+            EXCLUSION FILTER: If two different rooms from yesterday's state are moved
+            into the same single room number today (or if multiple bookings are consolidated
+            into one room), classify and flag this as a Room Merge and strictly exclude
+            it from standard room_moves.json.
+          - Check-out (Booking ID in master_state, missing from new_bookings).
+          - Check-in (Booking ID not in master_state, present in new_bookings).
+        Updates master_state.json, checkouts.json, room_moves.json, and state_metadata.json.
         """
         current_state = self.load_master_state()
+        date_str = processing_date.strftime("%d/%m/%Y")
 
-        room_moves = []
+        candidate_moves = []
         check_outs = []
         check_ins = []
         unchanged_count = 0
 
-        date_str = processing_date.strftime("%d/%m/%Y")
-
-        # 1. Compare new bookings with current state (detect Room Moves & Check-ins)
+        # 1. Compare new bookings with current state
         for booking_id, new_data in new_bookings.items():
             new_room = str(new_data.get("Δωμάτιο", "")).strip()
 
@@ -1291,7 +838,7 @@ class InHouseDataManager:
                         "date": date_str,
                         "timestamp": datetime.now().isoformat()
                     }
-                    room_moves.append(move_info)
+                    candidate_moves.append(move_info)
                 else:
                     unchanged_count += 1
             else:
@@ -1305,11 +852,58 @@ class InHouseDataManager:
                 }
                 check_ins.append(check_in_info)
 
-        # 2. Compare current state with new bookings (detect Check-outs)
+        # 2. Room Merge Detection & Exclusion Filter
+        # A room merge occurs if:
+        # a) Multiple candidate moves share the same new_room originating from different old_rooms.
+        # b) Or multiple bookings are consolidated into one room today where bookings came from different rooms yesterday.
+        merged_room_numbers = set()
+
+        # Check a: multiple candidate moves targeting the same new_room with different old_rooms
+        new_room_to_old_rooms: Dict[str, set] = {}
+        for cm in candidate_moves:
+            new_room_to_old_rooms.setdefault(cm["new_room"], set()).add(cm["old_room"])
+
+        for nr, old_rms in new_room_to_old_rooms.items():
+            if len(old_rms) > 1:
+                merged_room_numbers.add(nr)
+
+        # Check b: multiple bookings in new_bookings now share the same new_room
+        new_room_to_all_bookings: Dict[str, List[str]] = {}
+        for b_id, b_data in new_bookings.items():
+            rm = str(b_data.get("Δωμάτιο", "")).strip()
+            if rm:
+                new_room_to_all_bookings.setdefault(rm, []).append(b_id)
+
+        for nr, b_ids in new_room_to_all_bookings.items():
+            if len(b_ids) > 1:
+                yesterday_rooms = set()
+                moved_in = False
+                for b_id in b_ids:
+                    if b_id in current_state:
+                        prev_rm = str(current_state[b_id].get("Δωμάτιο", "")).strip()
+                        if prev_rm:
+                            yesterday_rooms.add(prev_rm)
+                            if prev_rm != nr:
+                                moved_in = True
+                if len(yesterday_rooms) > 1 or moved_in:
+                    merged_room_numbers.add(nr)
+
+        # Separate standard room moves from room merges
+        room_moves = []
+        room_merges = []
+        for cm in candidate_moves:
+            if cm["new_room"] in merged_room_numbers:
+                cm["is_room_merge"] = True
+                room_merges.append(cm)
+            else:
+                room_moves.append(cm)
+
+        # 3. Detect Check-outs
         for booking_id, old_data in current_state.items():
             if booking_id not in new_bookings:
                 check_out_info = {
                     "booking_id": booking_id,
+                    "property": DEFAULT_PROPERTY,
                     "guests": old_data.get("Πελάτες", []),
                     "room": old_data.get("Δωμάτιο", ""),
                     "departure": old_data.get("Αναχώρηση", ""),
@@ -1318,31 +912,22 @@ class InHouseDataManager:
                 }
                 check_outs.append(check_out_info)
 
-        # 3. Commit new state to master_state.json in root
+        # 4. Commit new state to master_state.json and update metadata
         self.save_master_state(new_bookings)
-        self.set_last_processed_date(processing_date)
+        self.set_last_sync_date(processing_date)
 
-        # 4. Record Check-outs to History & Departures Today
+        # 5. Record Check-outs to History
         if check_outs:
             self._archive_checkouts(check_outs)
             dep_payload = {
                 "property": DEFAULT_PROPERTY,
                 "date": date_str,
                 "total_departures": len(check_outs),
-                "departures": [
-                    {
-                        "booking_id": co.get("booking_id"),
-                        "guests": co.get("guests", []),
-                        "room": co.get("room", ""),
-                        "departure": co.get("departure", ""),
-                        "checkout_date": co.get("checkout_date", date_str)
-                    }
-                    for co in check_outs
-                ]
+                "departures": check_outs
             }
             self.save_departures_state(dep_payload, property_name=DEFAULT_PROPERTY)
 
-        # 5. Record Room Moves to Log & History
+        # 6. Record standard Room Moves (Excluding Merges)
         if room_moves:
             self._record_room_moves(room_moves)
 
@@ -1350,6 +935,7 @@ class InHouseDataManager:
             "date": date_str,
             "total_in_house": len(new_bookings),
             "room_moves": room_moves,
+            "room_merges": room_merges,
             "check_ins": check_ins,
             "check_outs": check_outs,
             "unchanged": unchanged_count
@@ -1360,12 +946,20 @@ class InHouseDataManager:
     # Audit & History Logging
     # -------------------------------------------------------------------------
     def _archive_checkouts(self, checkouts: List[Dict[str, Any]]):
+        """Archives checkouts into checkouts.json with deduplication."""
         existing = self.load_checkouts_history()
         records = existing.get("records", [])
+
+        # Deduplicate existing by (booking_id, checkout_date)
+        seen = {(r.get("booking_id"), r.get("checkout_date")) for r in records}
         for co in checkouts:
             if "property" not in co:
                 co["property"] = DEFAULT_PROPERTY
-        records.extend(checkouts)
+            key = (co.get("booking_id"), co.get("checkout_date"))
+            if key not in seen:
+                seen.add(key)
+                records.append(co)
+
         payload = {
             "property": DEFAULT_PROPERTY,
             "last_updated": datetime.now().isoformat(),
@@ -1373,12 +967,12 @@ class InHouseDataManager:
             "records": records
         }
         try:
-            save_and_archive_json(payload, "checkouts_today.json", subfolder="check out history")
-            save_and_archive_json(records, "check_out_history.json", subfolder="check out history")
+            save_and_archive_json(payload, CHECKOUTS_JSON)
         except Exception as e:
             print(f"[InHouseDataManager] Error archiving checkouts: {e}")
 
     def _record_room_moves(self, room_moves: List[Dict[str, Any]]):
+        """Records standard room moves into room_moves.json and text log."""
         try:
             with open(ROOM_MOVES_LOG_PATH, "a", encoding="utf-8") as f:
                 for rm in room_moves:
@@ -1394,10 +988,15 @@ class InHouseDataManager:
             print(f"[InHouseDataManager] Error writing room moves log: {e}")
 
         history = self.load_room_moves_history()
-        history.extend(room_moves)
+        seen = {(m.get("booking_id"), m.get("old_room"), m.get("new_room"), m.get("date")) for m in history}
+        for rm in room_moves:
+            k = (rm.get("booking_id"), rm.get("old_room"), rm.get("new_room"), rm.get("date"))
+            if k not in seen:
+                seen.add(k)
+                history.append(rm)
+
         try:
-            save_and_archive_json(history, "room_moves_yesterday.json", subfolder="room moves")
-            save_and_archive_json(history, "room_moves_history.json", subfolder="room moves")
+            save_and_archive_json(history, ROOM_MOVES_JSON)
         except Exception as e:
             print(f"[InHouseDataManager] Error writing room moves history JSON: {e}")
 
@@ -1405,38 +1004,38 @@ class InHouseDataManager:
     # Cleanup Manager
     # -------------------------------------------------------------------------
     def cleanup_file(self, file_path: str, mode: str = "trash") -> str:
-        """
-        Cleans up the ingested CSV file (In-House or Arrivals).
-        - mode='trash': Moves file to TRASH/ with timestamped suffix.
-        - mode='remove': Deletes file using os.remove.
-        """
+        """Moves processed CSV file into TRASH/ with timestamped suffix."""
         if not os.path.exists(file_path):
-            return "File already gone"
+            return file_path
 
-        if mode == "remove":
-            os.remove(file_path)
-            return "File permanently deleted"
-
-        base_name = os.path.basename(file_path)
-        name, ext = os.path.splitext(base_name)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         os.makedirs(self.trash_dir, exist_ok=True)
-        dest_filename = f"{name}_{timestamp}{ext}"
+        base_name = os.path.basename(file_path)
+        name_part, ext = os.path.splitext(base_name)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest_filename = f"{name_part}_PROCESSED_{timestamp}{ext}"
         dest_path = os.path.join(self.trash_dir, dest_filename)
 
-        shutil.move(file_path, dest_path)
-        return dest_path
+        try:
+            shutil.move(file_path, dest_path)
+            return dest_path
+        except Exception:
+            shutil.copy2(file_path, dest_path)
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+            return dest_path
 
 
 # =============================================================================
-# PyQt6 Gatekeeper Modal Dialog
+# PyQt6 Gatekeeper Modal Dialog (Strict In-House Sequential Synchronization)
 # =============================================================================
 
 class GatekeeperDialog(QDialog):
     """
     Blocking startup dialog that enforces sequential ingestion of all
-    missing daily In-House CSV files up to today and provides an Arrivals Tracker
-    for Sandy Beach and Sandy Villas before granting access to main app.
+    missing daily In-House CSV files for Sandy Beach up to today.
+    Contains strictly In-House Synchronization (No arrivals tracker tab).
     """
 
     ingestion_completed = pyqtSignal()
@@ -1446,16 +1045,16 @@ class GatekeeperDialog(QDialog):
         self.data_manager = data_manager or InHouseDataManager()
         self.missing_dates: List[date] = self.data_manager.get_missing_dates()
         self.current_step_idx: int = 0
-        self.all_detected_room_moves: List[Dict[str, Any]] = []
+        self.selected_inhouse_path: Optional[str] = None
 
-        self.setWindowTitle("Gatekeeper : In-House & Arrivals Synchronization")
-        self.setMinimumSize(840, 680)
+        self.setWindowTitle("Gatekeeper : In-House Synchronization")
+        self.setMinimumSize(780, 560)
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
         self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
 
         self._setup_styles()
         self._init_ui()
-        self._update_inhouse_step_ui()
+        self._update_step_ui()
 
     def _setup_styles(self):
         self.setStyleSheet("""
@@ -1466,50 +1065,30 @@ class GatekeeperDialog(QDialog):
             QFrame#header_card {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #800020, stop:1 #B03060);
                 border-radius: 8px;
-                padding: 16px;
+                padding: 18px;
             }
             QLabel#header_title {
                 color: #FFFFFF;
-                font-size: 18px;
+                font-size: 19px;
                 font-weight: bold;
             }
             QLabel#header_subtitle {
                 color: #FFE4E1;
-                font-size: 12px;
-            }
-            QTabWidget::pane {
-                border: 1px solid #E0E0E0;
-                background-color: #FFFFFF;
-                border-radius: 6px;
-                padding: 12px;
-            }
-            QTabBar::tab {
-                background-color: #ECEFF1;
-                color: #37474F;
-                padding: 8px 20px;
-                margin-right: 4px;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-                font-weight: bold;
-            }
-            QTabBar::tab:selected {
-                background-color: #FFFFFF;
-                color: #800020;
-                border-top: 3px solid #800020;
+                font-size: 13px;
             }
             QFrame#step_card {
                 background-color: #FFFFFF;
                 border: 1px solid #E0E0E0;
                 border-radius: 8px;
-                padding: 14px;
+                padding: 18px;
             }
             QLabel#target_date_badge {
                 background-color: #FFF0F5;
-                color: #B03060;
-                border: 1px solid #FF69B4;
+                color: #800020;
+                border: 1px solid #B03060;
                 border-radius: 4px;
-                padding: 6px 12px;
-                font-size: 15px;
+                padding: 6px 14px;
+                font-size: 16px;
                 font-weight: bold;
             }
             QPushButton.action-btn {
@@ -1528,7 +1107,7 @@ class GatekeeperDialog(QDialog):
                 color: white;
                 border: none;
                 border-radius: 4px;
-                padding: 10px 20px;
+                padding: 10px 22px;
                 font-weight: bold;
                 font-size: 13px;
             }
@@ -1543,7 +1122,7 @@ class GatekeeperDialog(QDialog):
                 color: white;
                 border: none;
                 border-radius: 4px;
-                padding: 8px 16px;
+                padding: 10px 18px;
                 font-weight: bold;
             }
             QPushButton#btn_quit:hover {
@@ -1554,7 +1133,7 @@ class GatekeeperDialog(QDialog):
                 color: white;
                 border: none;
                 border-radius: 4px;
-                padding: 10px 24px;
+                padding: 11px 26px;
                 font-size: 14px;
                 font-weight: bold;
             }
@@ -1582,48 +1161,42 @@ class GatekeeperDialog(QDialog):
 
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(10)
-        main_layout.setContentsMargins(14, 14, 14, 14)
+        main_layout.setSpacing(14)
+        main_layout.setContentsMargins(18, 18, 18, 18)
 
         # 1. Header Banner
         header_card = QFrame()
         header_card.setObjectName("header_card")
         h_layout = QVBoxLayout(header_card)
-        lbl_title = QLabel("GATEKEEPER : Daily In-House & Arrivals Synchronization")
+        lbl_title = QLabel("GATEKEEPER : Sequential In-House Synchronization")
         lbl_title.setObjectName("header_title")
         lbl_sub = QLabel(
             "State integrity validation is mandatory before accessing the workspace.\n"
-            "All daily In-House lists through today must be ingested sequentially, and today's arrivals "
-            "can be updated for Sandy Beach and Sandy Villas."
+            "All daily In-House lists through today must be ingested sequentially for Sandy Beach."
         )
         lbl_sub.setObjectName("header_subtitle")
         h_layout.addWidget(lbl_title)
         h_layout.addWidget(lbl_sub)
         main_layout.addWidget(header_card)
 
-        # 2. Main Tabs
-        self.tabs = QTabWidget()
-
-        # Tab 1: In-House Sequential Ingestion
-        tab_inhouse = QWidget()
-        inhouse_layout = QVBoxLayout(tab_inhouse)
-        inhouse_layout.setSpacing(10)
-
+        # 2. Progress Bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setFixedHeight(12)
         self.progress_bar.setTextVisible(False)
-        inhouse_layout.addWidget(self.progress_bar)
+        main_layout.addWidget(self.progress_bar)
 
+        # 3. In-House Synchronization Card
         self.step_card = QFrame()
         self.step_card.setObjectName("step_card")
         s_layout = QVBoxLayout(self.step_card)
+        s_layout.setSpacing(12)
 
         self.lbl_step_info = QLabel()
-        self.lbl_step_info.setStyleSheet("font-size: 13px; font-weight: bold; color: #2C3E50;")
+        self.lbl_step_info.setStyleSheet("font-size: 14px; font-weight: bold; color: #2C3E50;")
         s_layout.addWidget(self.lbl_step_info)
 
         date_row = QHBoxLayout()
-        date_row.addWidget(QLabel("Target Date to Ingest:"))
+        date_row.addWidget(QLabel("Target Date to Ingest (Sandy Beach):"))
         self.lbl_target_date = QLabel()
         self.lbl_target_date.setObjectName("target_date_badge")
         date_row.addWidget(self.lbl_target_date)
@@ -1650,74 +1223,17 @@ class GatekeeperDialog(QDialog):
         btn_action_row.addWidget(self.btn_process_inhouse)
         s_layout.addLayout(btn_action_row)
 
-        inhouse_layout.addWidget(self.step_card)
+        main_layout.addWidget(self.step_card)
 
-        lbl_info_note = QLabel(
-            "ℹ️ All state data, room moves, and checkouts are archived into DATABASE/ "
-            "and are accessible in the 'System Data & JSON Records' panel."
-        )
-        lbl_info_note.setStyleSheet("color: #555555; font-size: 12px; font-style: italic; padding: 8px;")
-        lbl_info_note.setWordWrap(True)
-        inhouse_layout.addWidget(lbl_info_note)
-        inhouse_layout.addStretch()
+        # 4. Ingestion Results Table
+        self.table_results = QTableWidget(0, 6)
+        self.table_results.setHorizontalHeaderLabels([
+            "Ingested Date", "Total In-House", "Room Moves", "Room Merges", "Check-Ins", "Check-Outs"
+        ])
+        self.table_results.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        main_layout.addWidget(self.table_results, stretch=1)
 
-        self.tabs.addTab(tab_inhouse, "1. In-House Synchronization")
-
-        # Tab 2: Arrivals Tracker (Sandy Beach & Sandy Villas)
-        tab_arrivals = QWidget()
-        arrivals_layout = QVBoxLayout(tab_arrivals)
-        arrivals_layout.setSpacing(12)
-
-        lbl_arr_desc = QLabel(
-            "Upload today's Arrivals CSV files to update the arrivals state for Sandy Beach and Sandy Villas."
-        )
-        lbl_arr_desc.setStyleSheet("color: #555555; font-size: 12px;")
-        arrivals_layout.addWidget(lbl_arr_desc)
-
-        group_beach = QGroupBox("🏖️ Sandy Beach Arrivals")
-        group_beach.setStyleSheet("QGroupBox { font-weight: bold; color: #1E3A8A; }")
-        beach_layout = QHBoxLayout(group_beach)
-        self.lbl_beach_file = QLabel("No file selected")
-        self.lbl_beach_file.setStyleSheet("color: #7F8C8D; font-style: italic;")
-        self.btn_browse_beach = QPushButton("📁 Browse Beach CSV...")
-        self.btn_browse_beach.setProperty("class", "action-btn")
-        self.btn_browse_beach.clicked.connect(lambda: self._browse_arrivals_csv("SANDY BEACH"))
-        self.btn_ingest_beach = QPushButton("⚡ Ingest Beach")
-        self.btn_ingest_beach.setEnabled(False)
-        self.btn_ingest_beach.clicked.connect(lambda: self._process_arrivals_file("SANDY BEACH"))
-
-        beach_layout.addWidget(self.lbl_beach_file, stretch=1)
-        beach_layout.addWidget(self.btn_browse_beach)
-        beach_layout.addWidget(self.btn_ingest_beach)
-        arrivals_layout.addWidget(group_beach)
-
-        group_villas = QGroupBox("🏡 Sandy Villas Arrivals")
-        group_villas.setStyleSheet("QGroupBox { font-weight: bold; color: #065F46; }")
-        villas_layout = QHBoxLayout(group_villas)
-        self.lbl_villas_file = QLabel("No file selected")
-        self.lbl_villas_file.setStyleSheet("color: #7F8C8D; font-style: italic;")
-        self.btn_browse_villas = QPushButton("📁 Browse Villas CSV...")
-        self.btn_browse_villas.setProperty("class", "action-btn")
-        self.btn_browse_villas.clicked.connect(lambda: self._browse_arrivals_csv("SANDY VILLAS"))
-        self.btn_ingest_villas = QPushButton("⚡ Ingest Villas")
-        self.btn_ingest_villas.setEnabled(False)
-        self.btn_ingest_villas.clicked.connect(lambda: self._process_arrivals_file("SANDY VILLAS"))
-
-        villas_layout.addWidget(self.lbl_villas_file, stretch=1)
-        villas_layout.addWidget(self.btn_browse_villas)
-        villas_layout.addWidget(self.btn_ingest_villas)
-        arrivals_layout.addWidget(group_villas)
-
-        self.lbl_arrivals_status = QLabel()
-        self._refresh_arrivals_summary_label()
-        arrivals_layout.addWidget(self.lbl_arrivals_status)
-        arrivals_layout.addStretch()
-
-        self.tabs.addTab(tab_arrivals, "2. Arrivals Tracker (Beach & Villas)")
-
-        main_layout.addWidget(self.tabs)
-
-        # 3. Bottom Controls
+        # 5. Bottom Controls
         bottom_row = QHBoxLayout()
         self.btn_quit = QPushButton("❌ Quit Application")
         self.btn_quit.setObjectName("btn_quit")
@@ -1733,166 +1249,84 @@ class GatekeeperDialog(QDialog):
         bottom_row.addWidget(self.btn_continue)
         main_layout.addLayout(bottom_row)
 
-        self.selected_inhouse_path: Optional[str] = None
-        self.selected_beach_path: Optional[str] = None
-        self.selected_villas_path: Optional[str] = None
-
-    def _refresh_arrivals_summary_label(self):
-        state = self.data_manager.load_arrivals_state()
-        beach_cnt = len(state.get("SANDY BEACH", {}))
-        villas_cnt = len(state.get("SANDY VILLAS", {}))
-        meta = state.get("_metadata", {})
-        dt = meta.get("date", "Not updated today")
-        self.lbl_arrivals_status.setText(
-            f"<b>Current Active State:</b> Date: <code>{dt}</code> | "
-            f"🏖️ Sandy Beach: <b>{beach_cnt} arrivals</b> | "
-            f"🏡 Sandy Villas: <b>{villas_cnt} arrivals</b>"
-        )
-        self.lbl_arrivals_status.setStyleSheet(
-            "background-color: #E8F5E9; color: #1B5E20; padding: 10px; border-radius: 4px; border: 1px solid #C8E6C9;"
-        )
-
-    def _update_inhouse_step_ui(self):
-        total_steps = len(self.missing_dates)
-
-        if self.current_step_idx >= total_steps:
+    def _update_step_ui(self):
+        total_missing = len(self.missing_dates)
+        if total_missing == 0 or self.current_step_idx >= total_missing:
             self.progress_bar.setValue(100)
-            self.step_card.setEnabled(False)
-            self.lbl_step_info.setText("✅ In-House synchronization complete through today.")
-            self.lbl_target_date.setText("All Up-to-Date")
-            self.lbl_inhouse_file.setText("State is fully synchronized.")
+            self.lbl_step_info.setText("✅ In-House state is fully up to date through today!")
+            self.lbl_target_date.setText("All In-House Dates Synchronized")
+            self.lbl_target_date.setStyleSheet("background-color: #D4EDDA; color: #155724; border: 1px solid #28A745; padding: 6px 14px;")
             self.btn_browse_inhouse.setEnabled(False)
             self.btn_process_inhouse.setEnabled(False)
             self.btn_continue.setEnabled(True)
             self.btn_continue.setStyleSheet("""
-                QPushButton#btn_continue {
-                    background-color: #27AE60;
-                    color: white;
-                    padding: 12px 28px;
-                    font-size: 15px;
-                }
+                background-color: #27AE60;
+                color: white;
+                font-weight: bold;
+                padding: 11px 26px;
+                border-radius: 4px;
+                font-size: 14px;
             """)
             return
 
+        progress_pct = int((self.current_step_idx / total_missing) * 100)
+        self.progress_bar.setValue(progress_pct)
+
         target_date = self.missing_dates[self.current_step_idx]
-        is_today = (target_date == date.today())
-        date_label = target_date.strftime("%d/%m/%Y") + (" (TODAY)" if is_today else "")
+        self.lbl_step_info.setText(f"Step {self.current_step_idx + 1} of {total_missing}: Mandatory In-House Ingestion")
+        self.lbl_target_date.setText(target_date.strftime("%d/%m/%Y (%A)"))
 
-        pct = int((self.current_step_idx / total_steps) * 100) if total_steps > 0 else 0
-        self.progress_bar.setValue(pct)
-
-        self.lbl_step_info.setText(f"Step {self.current_step_idx + 1} of {total_steps}: Ingest daily In-House export")
-        self.lbl_target_date.setText(date_label)
-        self.lbl_inhouse_file.setText(f"Please select the In-House CSV for {target_date.strftime('%d/%m/%Y')}")
         self.selected_inhouse_path = None
+        self.lbl_inhouse_file.setText("No file selected — Click Browse to choose CSV")
+        self.lbl_inhouse_file.setStyleSheet("color: #7F8C8D; font-style: italic;")
         self.btn_process_inhouse.setEnabled(False)
+        self.btn_continue.setEnabled(False)
 
     def _browse_inhouse_csv(self):
         target_date = self.missing_dates[self.current_step_idx]
+        initial_dir = BASE_DIR
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            f"Select In-House CSV for {target_date.strftime('%d/%m/%Y')}",
-            BASE_DIR,
+            f"Select In-House List CSV for {target_date.strftime('%d/%m/%Y')}",
+            initial_dir,
             "CSV Files (*.csv);;All Files (*.*)"
         )
         if file_path:
             self.selected_inhouse_path = file_path
-            self.lbl_inhouse_file.setText(os.path.basename(file_path))
+            self.lbl_inhouse_file.setText(f"Selected: {os.path.basename(file_path)}")
             self.lbl_inhouse_file.setStyleSheet("color: #2C3E50; font-weight: bold;")
             self.btn_process_inhouse.setEnabled(True)
 
     def _process_inhouse_file(self):
         if not self.selected_inhouse_path or not os.path.exists(self.selected_inhouse_path):
-            QMessageBox.warning(self, "Invalid File", "Selected file does not exist.")
+            QMessageBox.warning(self, "Error", "Selected file does not exist.")
             return
 
         target_date = self.missing_dates[self.current_step_idx]
-
         try:
-            new_bookings = self.data_manager.parse_in_house_csv(self.selected_inhouse_path)
-            if not new_bookings:
-                QMessageBox.critical(
-                    self,
-                    "Parsing Error",
-                    "No valid booking records found in the selected CSV. "
-                    "Ensure the file contains the booking ID column ('Αρ.')."
-                )
+            parsed = self.data_manager.parse_in_house_csv(self.selected_inhouse_path)
+            if not parsed:
+                QMessageBox.warning(self, "Validation Error", "No valid bookings detected in the selected CSV file.")
                 return
 
-            summary = self.data_manager.compare_and_update(new_bookings, target_date)
-            trash_dest = self.data_manager.cleanup_file(self.selected_inhouse_path, mode="trash")
+            summary = self.data_manager.compare_and_update(parsed, processing_date=target_date)
+            self.data_manager.cleanup_file(self.selected_inhouse_path, mode="trash")
 
-            for rm in summary["room_moves"]:
-                self.all_detected_room_moves.append(rm)
-
-            moves_count = len(summary["room_moves"])
-            in_count = len(summary["check_ins"])
-            out_count = len(summary["check_outs"])
-            total = summary["total_in_house"]
-
-            msg = (
-                f"Successfully ingested {target_date.strftime('%d/%m/%Y')}!\n\n"
-                f"• In-House Guests: {total} bookings\n"
-                f"• Room Moves Detected: {moves_count}\n"
-                f"• New Check-Ins: {in_count}\n"
-                f"• Check-Outs: {out_count}\n\n"
-                f"File moved to TRASH archive: {os.path.basename(trash_dest)}"
-            )
-            QMessageBox.information(self, "Step Complete", msg)
+            # Update results table
+            row = self.table_results.rowCount()
+            self.table_results.insertRow(row)
+            self.table_results.setItem(row, 0, QTableWidgetItem(target_date.strftime("%d/%m/%Y")))
+            self.table_results.setItem(row, 1, QTableWidgetItem(str(summary["total_in_house"])))
+            self.table_results.setItem(row, 2, QTableWidgetItem(str(len(summary["room_moves"]))))
+            self.table_results.setItem(row, 3, QTableWidgetItem(str(len(summary.get("room_merges", [])))))
+            self.table_results.setItem(row, 4, QTableWidgetItem(str(len(summary["check_ins"]))))
+            self.table_results.setItem(row, 5, QTableWidgetItem(str(len(summary["check_outs"]))))
 
             self.current_step_idx += 1
-            self._update_inhouse_step_ui()
+            self._update_step_ui()
 
         except Exception as e:
-            QMessageBox.critical(self, "Processing Failure", f"Failed to process In-House CSV:\n{str(e)}")
-
-    def _browse_arrivals_csv(self, property_name: str):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            f"Select Arrivals CSV for {property_name}",
-            BASE_DIR,
-            "CSV Files (*.csv);;All Files (*.*)"
-        )
-        if file_path:
-            if property_name == "SANDY BEACH":
-                self.selected_beach_path = file_path
-                self.lbl_beach_file.setText(os.path.basename(file_path))
-                self.lbl_beach_file.setStyleSheet("color: #1E3A8A; font-weight: bold;")
-                self.btn_ingest_beach.setEnabled(True)
-            else:
-                self.selected_villas_path = file_path
-                self.lbl_villas_file.setText(os.path.basename(file_path))
-                self.lbl_villas_file.setStyleSheet("color: #065F46; font-weight: bold;")
-                self.btn_ingest_villas.setEnabled(True)
-
-    def _process_arrivals_file(self, property_name: str):
-        target_path = self.selected_beach_path if property_name == "SANDY BEACH" else self.selected_villas_path
-        if not target_path or not os.path.exists(target_path):
-            QMessageBox.warning(self, "Invalid File", "Selected file does not exist.")
-            return
-
-        try:
-            detected_prop, arrivals = self.data_manager.parse_arrivals_csv(target_path, property_name=property_name)
-            self.data_manager.update_arrivals_state(detected_prop, arrivals)
-            trash_dest = self.data_manager.cleanup_file(target_path, mode="trash")
-
-            self._refresh_arrivals_summary_label()
-            QMessageBox.information(
-                self,
-                "Arrivals Ingested",
-                f"Successfully processed {len(arrivals)} arrivals for {detected_prop}!\n\n"
-                f"File moved to TRASH archive: {os.path.basename(trash_dest)}"
-            )
-
-            if property_name == "SANDY BEACH":
-                self.btn_ingest_beach.setEnabled(False)
-                self.lbl_beach_file.setText(f"Ingested ({len(arrivals)} records)")
-            else:
-                self.btn_ingest_villas.setEnabled(False)
-                self.lbl_villas_file.setText(f"Ingested ({len(arrivals)} records)")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Processing Failure", f"Failed to parse Arrivals CSV:\n{str(e)}")
+            QMessageBox.critical(self, "Processing Error", f"Failed to ingest CSV:\n{str(e)}")
 
     def _abort_and_quit(self):
         reply = QMessageBox.question(

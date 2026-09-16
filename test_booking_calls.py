@@ -191,8 +191,43 @@ class TestBookingCallsManager(unittest.TestCase):
         self.assertEqual(loaded[0]["agency"], "BOOKING.COM")
         self.assertEqual(loaded[0]["status"], "Green")
 
-    def test_populate_strictly_in_followup_sheet_never_sheet_1(self):
-        # Mock master state with a Booking.com booking and a non-Booking.com booking
+    def test_sync_sheet1_arrivals_and_sheet2_followup(self):
+        # Mock arrivals state with Booking.com and non-Booking.com arrivals
+        mock_arrivals = {
+            "SANDY BEACH": {
+                "10001": {
+                    "room": "1101",
+                    "guests": ["Booking Guest"],
+                    "agency": "BOOKING.COM",
+                    "arrival": "15/09/2026",
+                    "departure": "22/09/2026"
+                },
+                "20002": {
+                    "room": "1202",
+                    "guests": ["TUI Guest"],
+                    "agency": "TUI",
+                    "arrival": "15/09/2026",
+                    "departure": "22/09/2026"
+                }
+            }
+        }
+        self.manager.data_manager.load_arrivals_state = lambda: mock_arrivals
+
+        # Sync Sheet 1 (ARRIVALS)
+        count = self.manager.sync_today_arrivals_to_excel()
+        self.assertEqual(len(count), 1)
+        self.assertEqual(count, ["1101"])
+
+        wb = openpyxl.load_workbook(self.xlsx_path)
+        sheet_arrivals = wb["ARRIVALS"]
+        found_1101_arr = any("1101" in str(sheet_arrivals.cell(r, c).value or "")
+                             for r in range(1, 20) for c in range(1, 10))
+        found_1202_arr = any("1202" in str(sheet_arrivals.cell(r, c).value or "")
+                             for r in range(1, 20) for c in range(1, 10))
+        self.assertTrue(found_1101_arr, "Booking.com room 1101 must be in Sheet 1 ARRIVALS")
+        self.assertFalse(found_1202_arr, "Non-Booking.com room 1202 must NOT be in Sheet 1 ARRIVALS")
+
+        # Mock master state for Sheet 2 (FOLLOW UP)
         mock_master = {
             "10001": {
                 "Δωμάτιο": "1101",
@@ -211,36 +246,65 @@ class TestBookingCallsManager(unittest.TestCase):
         }
         self.manager.data_manager.load_master_state = lambda: mock_master
 
-        # Run follow-up synchronization
+        # Sync Sheet 2 (FOLLOW UP)
         schedule = self.manager.sync_followup_schedule_to_excel()
         self.assertGreater(len(schedule), 0)
 
         wb = openpyxl.load_workbook(self.xlsx_path)
+        sheet_followup = wb["FOLLOW UP"]
+        found_1101_fol = any("1101" in str(sheet_followup.cell(r, c).value or "")
+                             for r in range(1, 25) for c in range(1, 15))
+        found_1202_fol = any("1202" in str(sheet_followup.cell(r, c).value or "")
+                             for r in range(1, 25) for c in range(1, 15))
+        self.assertTrue(found_1101_fol, "Booking.com room 1101 must be in Sheet 2 FOLLOW UP")
+        self.assertFalse(found_1202_fol, "Non-Booking.com room 1202 must NOT be in Sheet 2 FOLLOW UP")
 
-        # 1. Sheet 1 (first sheet) MUST NOT have booking calls data populated
-        first_sheet = wb.worksheets[0]
-        # Any row 3 onwards in first sheet should remain None
-        for r in range(3, max(first_sheet.max_row + 1, 10)):
-            for c in range(2, max(first_sheet.max_column + 1, 5)):
-                self.assertIsNone(first_sheet.cell(r, c).value)
+    def test_direct_cell_manipulation_colors_and_strings(self):
+        # Seed cell 1101 under date 2026-09-11 in Sheet 2 (FOLLOW UP)
+        wb_init = openpyxl.load_workbook(self.xlsx_path)
+        ws_init = wb_init["FOLLOW UP"]
+        ws_init.cell(1, 2).value = date(2026, 9, 11)
+        ws_init.cell(3, 2).value = "1101"
+        wb_init.save(self.xlsx_path)
 
-        # 2. Follow-Up Sheet MUST have Booking.com room 1101 populated
-        followup_sheet = self.manager._get_followup_sheet(wb)
-        self.assertIsNotNone(followup_sheet)
-        self.assertNotEqual(followup_sheet.title, first_sheet.title)
+        # 1. Update cell with Green color
+        ok = self.manager.update_excel_cell_status(
+            room="1101",
+            target_date=date(2026, 9, 11),
+            status="Green",
+            sheet_name="FOLLOW UP"
+        )
+        self.assertTrue(ok)
 
-        found_1101 = False
-        found_1202 = False
-        for r in range(3, followup_sheet.max_row + 1):
-            for c in range(1, followup_sheet.max_column + 1):
-                val = str(followup_sheet.cell(r, c).value or "")
-                if val == "1101":
-                    found_1101 = True
-                if val == "1202":
-                    found_1202 = True
+        wb = openpyxl.load_workbook(self.xlsx_path)
+        ws = wb["FOLLOW UP"]
+        cell_1101 = None
+        for r in range(1, ws.max_row + 1):
+            for c in range(1, ws.max_column + 1):
+                if "1101" in str(ws.cell(r, c).value or ""):
+                    cell_1101 = ws.cell(r, c)
+                    break
+            if cell_1101:
+                break
 
-        self.assertTrue(found_1101, "Booking.com room 1101 must be in Follow-Up sheet")
-        self.assertFalse(found_1202, "Non-Booking.com room 1202 must NOT be in Follow-Up sheet")
+        self.assertIsNotNone(cell_1101)
+        self.assertIsNotNone(cell_1101.fill)
+        self.assertIn("D4EDDA", str(cell_1101.fill.start_color.rgb).upper())
+
+        # 2. Update cell with N/A status (string insertion into cell)
+        ok2 = self.manager.update_excel_cell_status(
+            room="1101",
+            target_date=date(2026, 9, 11),
+            status="N/A (NO ANSWER)",
+            sheet_name="FOLLOW UP"
+        )
+        self.assertTrue(ok2)
+
+        wb = openpyxl.load_workbook(self.xlsx_path)
+        ws = wb["FOLLOW UP"]
+        val_after = str(ws.cell(cell_1101.row, cell_1101.column).value or "")
+        self.assertIn("N/A", val_after)
+        self.assertIn("1101", val_after)
 
     def test_feedback_to_do_formatting(self):
         comment = "Guest requested extra pillows"
