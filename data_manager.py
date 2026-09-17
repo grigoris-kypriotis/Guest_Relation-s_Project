@@ -33,6 +33,8 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "OUTPUT")
 TRASH_DIR = os.path.join(BASE_DIR, "TRASH")
 TODAYS_LIST_DIR = os.path.join(OUTPUT_DIR, "todays_list")
 BOOKING_CALLS_DIR = os.path.join(BASE_DIR, "BOOKING CALLS")
+PLOT_DIR = os.path.join(BASE_DIR, "PLOT")
+HOTEL_DATASET_PATH = os.path.join(PLOT_DIR, "HotelDataSet.json")
 
 # Standardized Target Directories inside DATABASE/
 HOTEL_STATE_DIR = os.path.join(DATABASE_DIR, "HOTEL STATE")
@@ -300,7 +302,8 @@ def ensure_workspace_directories():
         os.path.join(OUTPUT_DIR, "CAKE_MEMOS"),
         TODAYS_LIST_DIR,
         TRASH_DIR,
-        BOOKING_CALLS_DIR
+        BOOKING_CALLS_DIR,
+        PLOT_DIR
     ]
     for d in dirs_to_create:
         os.makedirs(d, exist_ok=True)
@@ -611,6 +614,94 @@ class InHouseDataManager:
 
         return detected_enc, delimiter
 
+    def _process_in_house_rows(self, raw_rows: Any) -> Dict[str, Dict[str, Any]]:
+        """Core parsing engine for in-house rows (CSV or Excel)."""
+        bookings: Dict[str, Dict[str, Any]] = {}
+        header = None
+
+        for raw_row in raw_rows:
+            if not raw_row:
+                continue
+
+            cleaned_row = [str(cell).strip().strip('"\'') for cell in raw_row]
+
+            if header is None:
+                is_header = any(
+                    any(alias.lower() == cell.lower() for alias in self.BOOKING_ID_KEYS)
+                    for cell in cleaned_row
+                )
+                if is_header:
+                    header = cleaned_row
+                    continue
+
+                # Fallback for headerless In-House exports (Room in col 0, Date in col 2, Booking ID in col 7 or 9)
+                if len(cleaned_row) >= 8 and re.match(r"^\d{3,4}$", cleaned_row[0]) and re.search(r"\d{1,2}/\d{1,2}/\d{2,4}", cleaned_row[2]):
+                    if len(cleaned_row) > 7 and cleaned_row[7].isdigit():
+                        header = ["Δωμάτιο", "Πελάτης", "Άφιξη", "Αναχώρηση", "Τύπος Δωμ", "Κρατηθείς Τύπος", "Χρεώστης", "Αρ.", "Τύπος Γεύματος", "Αγορά", "Αρ. Ενηλ"]
+                    elif len(cleaned_row) > 9 and cleaned_row[9].isdigit():
+                        header = ["Δωμάτιο", "Πελάτης", "Άφιξη", "Αναχώρηση", "Τύπος Δωμ", "Κρατηθείς Τύπος", "Χρεώστης", "col7", "col8", "Αρ.", "Τύπος Γεύματος", "Αγορά", "Αρ. Ενηλ"]
+                    if header:
+                        while len(header) < len(cleaned_row):
+                            header.append(f"col_{len(header)}")
+                else:
+                    continue
+
+            if not any(cleaned_row):
+                continue
+
+            row_dict = {}
+            for idx, col_name in enumerate(header):
+                if idx < len(cleaned_row):
+                    row_dict[col_name] = cleaned_row[idx]
+                else:
+                    row_dict[col_name] = ""
+
+            # Identify Booking ID
+            booking_id = None
+            for key_alias in self.BOOKING_ID_KEYS:
+                for col in header:
+                    if col.strip().lower() == key_alias.lower():
+                        val = row_dict.get(col, "").strip()
+                        if val:
+                            booking_id = val
+                            break
+                if booking_id:
+                    break
+
+            if not booking_id:
+                continue
+
+            # Identify Guest Name
+            guest_name = ""
+            for key_alias in self.GUEST_NAME_KEYS:
+                for col in header:
+                    if col.strip().lower() == key_alias.lower():
+                        guest_name = row_dict.get(col, "").strip()
+                        break
+                if guest_name:
+                    break
+
+            # Prepare fields for JSON, omitting "Τύπος Γεύματος" and guest col
+            if booking_id not in bookings:
+                booking_entry: Dict[str, Any] = {}
+                for col, val in row_dict.items():
+                    col_clean = col.strip()
+                    if col_clean.lower() in self.EXCLUDED_COLUMNS:
+                        continue
+                    if any(col_clean.lower() == alias.lower() for alias in self.GUEST_NAME_KEYS):
+                        continue
+                    if any(col_clean.lower() == alias.lower() for alias in self.BOOKING_ID_KEYS):
+                        continue
+                    booking_entry[col_clean] = val
+
+                booking_entry["Πελάτες"] = []
+                bookings[booking_id] = booking_entry
+
+            if guest_name and guest_name not in bookings[booking_id]["Πελάτες"]:
+                bookings[booking_id]["Πελάτες"].append(guest_name)
+
+        return bookings
+
     def parse_in_house_csv(self, file_path: str) -> Dict[str, Dict[str, Any]]:
         """
         Parses an in-house list CSV file.
@@ -623,96 +714,62 @@ class InHouseDataManager:
             raise FileNotFoundError(f"File not found: {file_path}")
 
         encoding, delimiter = self._detect_encoding_and_delimiter(file_path)
-        bookings: Dict[str, Dict[str, Any]] = {}
-
         with open(file_path, mode="r", encoding=encoding, errors="replace") as f:
             reader = csv.reader(f, delimiter=delimiter)
-            header = None
+            return self._process_in_house_rows(reader)
 
-            for raw_row in reader:
-                if not raw_row:
+    def parse_in_house_excel(self, file_path: str) -> Dict[str, Dict[str, Any]]:
+        """Parses an in-house list Excel file (.xlsx or .xls)."""
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        ext = os.path.splitext(file_path)[1].lower()
+        rows: List[List[str]] = []
+
+        if ext == ".xlsx":
+            import openpyxl
+            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+            ws = wb.active
+            for row in ws.iter_rows(values_only=True):
+                if row is None:
                     continue
-
-                cleaned_row = [cell.strip().strip('"\'') for cell in raw_row]
-
-                if header is None:
-                    is_header = any(
-                        any(alias.lower() == cell.lower() for alias in self.BOOKING_ID_KEYS)
-                        for cell in cleaned_row
-                    )
-                    if is_header:
-                        header = cleaned_row
-                        continue
-
-                    # Fallback for headerless In-House CSV exports (Room in col 0, Date in col 2, Booking ID in col 7 or 9)
-                    if len(cleaned_row) >= 8 and re.match(r"^\d{3,4}$", cleaned_row[0]) and re.search(r"\d{1,2}/\d{1,2}/\d{2,4}", cleaned_row[2]):
-                        if len(cleaned_row) > 7 and cleaned_row[7].isdigit():
-                            header = ["Δωμάτιο", "Πελάτης", "Άφιξη", "Αναχώρηση", "Τύπος Δωμ", "Κρατηθείς Τύπος", "Χρεώστης", "Αρ.", "Τύπος Γεύματος", "Αγορά", "Αρ. Ενηλ"]
-                        elif len(cleaned_row) > 9 and cleaned_row[9].isdigit():
-                            header = ["Δωμάτιο", "Πελάτης", "Άφιξη", "Αναχώρηση", "Τύπος Δωμ", "Κρατηθείς Τύπος", "Χρεώστης", "col7", "col8", "Αρ.", "Τύπος Γεύματος", "Αγορά", "Αρ. Ενηλ"]
-                        if header:
-                            while len(header) < len(cleaned_row):
-                                header.append(f"col_{len(header)}")
+                rows.append([str(c).strip() if c is not None else "" for c in row])
+            wb.close()
+        elif ext == ".xls":
+            import xlrd
+            wb = xlrd.open_workbook(file_path)
+            ws = wb.sheet_by_index(0)
+            for r in range(ws.nrows):
+                row_vals = []
+                for c in range(ws.ncols):
+                    cell = ws.cell(r, c)
+                    if cell.ctype == xlrd.XL_CELL_DATE:
+                        try:
+                            dt = xlrd.xldate_as_datetime(cell.value, wb.datemode)
+                            row_vals.append(dt.strftime("%d/%m/%Y"))
+                            continue
+                        except Exception:
+                            pass
+                    val = cell.value
+                    if isinstance(val, float) and val.is_integer():
+                        row_vals.append(str(int(val)))
                     else:
-                        continue
+                        row_vals.append(str(val).strip() if val is not None else "")
+                rows.append(row_vals)
+        else:
+            raise ValueError(f"Unsupported Excel format: {ext}")
 
-                if not any(cleaned_row):
-                    continue
+        return self._process_in_house_rows(rows)
 
-                row_dict = {}
-                for idx, col_name in enumerate(header):
-                    if idx < len(cleaned_row):
-                        row_dict[col_name] = cleaned_row[idx]
-                    else:
-                        row_dict[col_name] = ""
-
-                # Identify Booking ID
-                booking_id = None
-                for key_alias in self.BOOKING_ID_KEYS:
-                    for col in header:
-                        if col.strip().lower() == key_alias.lower():
-                            val = row_dict.get(col, "").strip()
-                            if val:
-                                booking_id = val
-                                break
-                    if booking_id:
-                        break
-
-                if not booking_id:
-                    continue
-
-                # Identify Guest Name
-                guest_name = ""
-                for key_alias in self.GUEST_NAME_KEYS:
-                    for col in header:
-                        if col.strip().lower() == key_alias.lower():
-                            guest_name = row_dict.get(col, "").strip()
-                            break
-                    if guest_name:
-                        break
-
-                # Prepare fields for JSON, omitting "Τύπος Γεύματος" and guest col
-                if booking_id not in bookings:
-                    booking_entry: Dict[str, Any] = {}
-                    for col, val in row_dict.items():
-                        col_clean = col.strip()
-                        if col_clean.lower() in self.EXCLUDED_COLUMNS:
-                            continue
-                        if any(col_clean.lower() == alias.lower() for alias in self.GUEST_NAME_KEYS):
-                            continue
-                        if any(col_clean.lower() == alias.lower() for alias in self.BOOKING_ID_KEYS):
-                            continue
-                        booking_entry[col_clean] = val
-
-                    booking_entry["Πελάτες"] = []
-                    bookings[booking_id] = booking_entry
-
-                if guest_name and guest_name not in bookings[booking_id]["Πελάτες"]:
-                    bookings[booking_id]["Πελάτες"].append(guest_name)
-
-        return bookings
+    def parse_in_house_file(self, file_path: str) -> Dict[str, Dict[str, Any]]:
+        """Unified parser accepting .csv, .xlsx, and .xls in-house files."""
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext in [".xlsx", ".xls"]:
+            return self.parse_in_house_excel(file_path)
+        return self.parse_in_house_csv(file_path)
 
     # Alias for backward compatibility
+    parse_isws_csv = parse_in_house_csv
     parse_isws_csv = parse_in_house_csv
 
     def detect_property_from_file(self, file_path: str) -> str:
@@ -920,6 +977,12 @@ class InHouseDataManager:
         self.save_master_state(new_bookings)
         self.set_last_sync_date(processing_date)
 
+        # 4.1 Automated Room Block Exporter synchronization
+        try:
+            self.export_room_block_json_data()
+        except Exception as exp_err:
+            print(f"[InHouseDataManager] Warning during auto room block export: {exp_err}")
+
         # 5. Record Check-outs to History
         if check_outs:
             self._archive_checkouts(check_outs)
@@ -1029,6 +1092,307 @@ class InHouseDataManager:
             except Exception:
                 pass
             return dest_path
+
+    # -------------------------------------------------------------------------
+    # Database Purge & Room Block JSON Exporter
+    # -------------------------------------------------------------------------
+    def purge_hotel_database(self) -> bool:
+        """
+        Purges transient room and guest records from DATABASE/HOTEL STATE/,
+        resetting current occupancy states while keeping templates and system configuration intact.
+        """
+        # 1. Reset master_state.json
+        save_and_archive_json({}, self.master_state_path)
+
+        # 2. Reset state_metadata.json
+        reset_meta = {
+            "last_sync_date": None,
+            "last_updated_at": None,
+            "total_bookings": 0,
+            "last_processed_date": None
+        }
+        self.save_metadata(reset_meta)
+
+        # 3. Synchronize / reset PLOT block files
+        try:
+            self.export_room_block_json_data()
+        except Exception as e:
+            print(f"[InHouseDataManager] Warning resetting block files on purge: {e}")
+
+        return True
+
+    def export_room_block_json_data(
+        self,
+        plot_dir: Optional[Union[str, Path]] = None,
+        hotel_dataset_path: Optional[Union[str, Path]] = None
+    ) -> Dict[str, Any]:
+        """
+        Iterates over every room block defined in HotelDataSet.json (Block 1100 through Block 8000, plus Blocks 100-800).
+        For each block:
+          - Creates a subfolder named after the block (e.g., BLOCK_1100, BLOCK_7000).
+          - Calculates live occupancy metrics against active In-House List (master_state.json):
+              Occupancy Percentage = (Occupied Rooms in Block / Total Rooms in Block) * 100
+          - Constructs payload with all original metadata fields + occupancy_metrics:
+              total_rooms, occupied_rooms, vacant_rooms, occupancy_percentage, last_updated
+          - Saves as <BLOCK_NAME>.json inside the subfolder with UTF-8 and indent=4.
+        """
+        plot_dir_p = Path(plot_dir or PLOT_DIR)
+        dataset_path = Path(hotel_dataset_path or HOTEL_DATASET_PATH)
+
+        if not dataset_path.exists():
+            raise FileNotFoundError(f"Hotel dataset not found: {dataset_path}")
+
+        with open(dataset_path, "r", encoding="utf-8") as f:
+            dataset = json.load(f)
+
+        master = self.load_master_state()
+        occupied_rooms = set()
+        for b_data in master.values():
+            rm = str(b_data.get("Δωμάτιο") or b_data.get("room") or b_data.get("Room") or b_data.get("room_number") or "").strip()
+            if rm:
+                occupied_rooms.add(rm)
+
+        def expand_range(rng_str: str) -> List[str]:
+            m = re.match(r"^(\d+)-(\d+)$", rng_str.strip())
+            if m:
+                start, end = int(m.group(1)), int(m.group(2))
+                return [str(r) for r in range(start, end + 1)]
+            return [rng_str.strip()]
+
+        exported_blocks = []
+        os.makedirs(plot_dir_p, exist_ok=True)
+        now_iso = datetime.now().isoformat()
+
+        for item in dataset:
+            cat = str(item.get("category", ""))
+            name = str(item.get("name", ""))
+
+            # Check if this entity is a room block
+            if "Rooms" not in cat and not name.upper().startswith("BLOCK"):
+                continue
+
+            rooms = set()
+            rd = item.get("room_details", {})
+            floors = rd.get("floors", {})
+            for floor_name, r_list in floors.items():
+                for r_entry in r_list:
+                    for r in expand_range(r_entry):
+                        rooms.add(r)
+
+            # Fallback to description for blocks without floors (e.g. Blocks 100-800)
+            desc = str(item.get("description", ""))
+            m_desc = re.search(r"ROOMS?\s+(\d+)-(\d+)", desc, re.IGNORECASE)
+            if m_desc and not rooms:
+                start, end = int(m_desc.group(1)), int(m_desc.group(2))
+                for r in range(start, end + 1):
+                    rooms.add(str(r))
+
+            total_rooms = rd.get("total_rooms") or len(rooms)
+            if total_rooms <= 0:
+                total_rooms = len(rooms) if len(rooms) > 0 else 1
+
+            occupied_count = len(rooms.intersection(occupied_rooms))
+            vacant_count = max(0, total_rooms - occupied_count)
+            occ_pct = round((occupied_count / total_rooms) * 100, 2) if total_rooms > 0 else 0.0
+
+            # Create deepcopy payload
+            payload = json.loads(json.dumps(item))
+            payload["occupancy_metrics"] = {
+                "total_rooms": int(total_rooms),
+                "occupied_rooms": int(occupied_count),
+                "vacant_rooms": int(vacant_count),
+                "occupancy_percentage": occ_pct,
+                "last_updated": now_iso
+            }
+
+            # Subfolder name (e.g. BLOCK_1100)
+            block_slug = re.sub(r"[^\w\d]+", "_", name.strip()).strip("_")
+            block_folder = plot_dir_p / block_slug
+            os.makedirs(block_folder, exist_ok=True)
+
+            json_path = block_folder / f"{block_slug}.json"
+            with open(json_path, "w", encoding="utf-8") as out_f:
+                json.dump(payload, out_f, indent=4, ensure_ascii=False)
+
+            exported_blocks.append({
+                "block": name,
+                "slug": block_slug,
+                "path": str(json_path),
+                "metrics": payload["occupancy_metrics"]
+            })
+
+        return {
+            "total_exported": len(exported_blocks),
+            "blocks": exported_blocks,
+            "timestamp": now_iso
+        }
+
+
+def purge_hotel_database() -> bool:
+    """Convenience top-level wrapper to purge transient hotel database records."""
+    return InHouseDataManager().purge_hotel_database()
+
+
+def export_room_block_json_data(
+    plot_dir: Optional[Union[str, Path]] = None,
+    hotel_dataset_path: Optional[Union[str, Path]] = None
+) -> Dict[str, Any]:
+    """Convenience top-level wrapper to export room block JSON payloads to PLOT/."""
+    return InHouseDataManager().export_room_block_json_data(plot_dir, hotel_dataset_path)
+
+
+# =============================================================================
+# In-House Report Timestamp & Security Validation Helpers
+# =============================================================================
+
+def extract_inhouse_report_date(file_path: Union[str, Path]) -> Tuple[Optional[date], Optional[str]]:
+    """
+    Parses the internal header, metadata, or report timestamp cell of an In-House List file (.csv, .xlsx, .xls).
+    Returns (operational_date, timestamp_str).
+    """
+    p = Path(file_path)
+    if not p.exists():
+        return None, None
+
+    found_date: Optional[date] = None
+    found_time_str: Optional[str] = None
+    ext = p.suffix.lower()
+
+    if ext == ".csv":
+        enc, _ = InHouseDataManager._detect_encoding_and_delimiter(str(p))
+        try:
+            with open(p, "r", encoding=enc, errors="replace") as f:
+                lines = [l.strip() for l in f if l.strip()]
+        except Exception:
+            lines = []
+
+        candidates = lines[:50] + lines[-50:]
+        for line in reversed(candidates):
+            m_dt = re.search(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b", line)
+            if m_dt:
+                is_meta = any(k in line.lower() for k in ["page", "σελίδα", "totals", "hotel", "print", "εκτύπωση", "report", "λίστα"])
+                if is_meta or len(line.split(";")) <= 5 or len(line.split(",")) <= 5:
+                    try:
+                        d_val = int(m_dt.group(1))
+                        m_val = int(m_dt.group(2))
+                        y_val = int(m_dt.group(3))
+                        found_date = date(y_val, m_val, d_val)
+                        m_tm = re.search(r"(\d{1,2}:\d{2}(?::\d{2})?\s*(?:[ap]\.?m\.?|μμ|πμ)?)", line, re.IGNORECASE)
+                        if m_tm:
+                            found_time_str = m_tm.group(1)
+                        break
+                    except Exception:
+                        pass
+
+    elif ext == ".xlsx":
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(str(p), read_only=True, data_only=True)
+            ws = wb.active
+            rows_sample = []
+            idx = 0
+            for row in ws.iter_rows(values_only=True):
+                if row:
+                    rows_sample.append(row)
+                idx += 1
+                if idx > 100:
+                    break
+            wb.close()
+
+            for row in rows_sample:
+                for c in row:
+                    if isinstance(c, datetime):
+                        found_date = c.date()
+                        found_time_str = c.strftime("%H:%M:%S")
+                        break
+                    elif isinstance(c, date):
+                        found_date = c
+                        break
+                    elif isinstance(c, str):
+                        m_dt = re.search(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b", c)
+                        if m_dt:
+                            try:
+                                found_date = date(int(m_dt.group(3)), int(m_dt.group(2)), int(m_dt.group(1)))
+                                break
+                            except Exception:
+                                pass
+                if found_date:
+                    break
+        except Exception as err:
+            print(f"[extract_inhouse_report_date] Error reading xlsx: {err}")
+
+    elif ext == ".xls":
+        try:
+            import xlrd
+            wb = xlrd.open_workbook(str(p))
+            ws = wb.sheet_by_index(0)
+            for r in range(min(ws.nrows, 100)):
+                for c in range(ws.ncols):
+                    cell = ws.cell(r, c)
+                    if cell.ctype == xlrd.XL_CELL_DATE:
+                        try:
+                            dt = xlrd.xldate_as_datetime(cell.value, wb.datemode)
+                            found_date = dt.date()
+                            found_time_str = dt.strftime("%H:%M:%S")
+                            break
+                        except Exception:
+                            pass
+                    elif isinstance(cell.value, str):
+                        m_dt = re.search(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b", cell.value)
+                        if m_dt:
+                            try:
+                                found_date = date(int(m_dt.group(3)), int(m_dt.group(2)), int(m_dt.group(1)))
+                                break
+                            except Exception:
+                                pass
+                if found_date:
+                    break
+        except Exception as err:
+            print(f"[extract_inhouse_report_date] Error reading xls: {err}")
+
+    # Fallback to filename
+    if not found_date:
+        fname = p.name
+        m_fn = re.search(r"(\d{4})[-_.](\d{1,2})[-_.](\d{1,2})", fname)
+        if m_fn:
+            try:
+                found_date = date(int(m_fn.group(1)), int(m_fn.group(2)), int(m_fn.group(3)))
+            except Exception:
+                pass
+        if not found_date:
+            m_fn2 = re.search(r"(\d{1,2})[-_.](\d{1,2})[-_.](\d{4})", fname)
+            if m_fn2:
+                try:
+                    found_date = date(int(m_fn2.group(3)), int(m_fn2.group(2)), int(m_fn2.group(1)))
+                except Exception:
+                    pass
+
+    ts_display = None
+    if found_date:
+        if found_time_str:
+            ts_display = f"{found_date.strftime('%Y-%m-%d')} {found_time_str}"
+        else:
+            ts_display = found_date.strftime("%Y-%m-%d")
+
+    return found_date, ts_display
+
+
+def validate_inhouse_file_date(file_path: Union[str, Path], target_date: Optional[date] = None) -> Tuple[bool, Optional[date], str]:
+    """
+    Validates that the selected in-house list's operational date matches today's operational date.
+    Returns (is_valid, extracted_date, message).
+    """
+    target = target_date or date.today()
+    extracted_dt, ts_str = extract_inhouse_report_date(file_path)
+
+    if not extracted_dt:
+        return False, None, "Validation Error: Selected file lacks internal report timestamp or operational date metadata."
+
+    if extracted_dt != target:
+        msg = f"Validation Error: Selected report date [{extracted_dt.strftime('%Y-%m-%d')}] does not match current operational date [{target.strftime('%Y-%m-%d')}]."
+        return False, extracted_dt, msg
+
+    return True, extracted_dt, f"Validation successful: Report date [{extracted_dt.strftime('%Y-%m-%d')}] matches current operational date."
 
 
 # =============================================================================

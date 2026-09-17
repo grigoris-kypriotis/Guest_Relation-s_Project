@@ -28,6 +28,7 @@ Desktop.ini
 # Sensitive Guest Data & Runtime Storage (NO JSONs, NO CSVs)
 *.json
 *.csv
+!PLOT/HotelDataSet.json
 
 # Runtime generated Excel & Word documents (Templates are tracked)
 *.xlsx

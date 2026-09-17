@@ -1,0 +1,590 @@
+[
+  {
+    "id": 1,
+    "name": "BLOCK 1100",
+    "category": "Rooms",
+    "description": "ROOMS 1101-1129",
+    "distances": "Next to Reception (17). Far from Beach Area (29). Difficult access to Elia Main Restaurant (23).",
+    "room_details": {
+      "total_rooms": 27,
+      "types": {
+        "F1": 14,
+        "F2": 6,
+        "F SUP": 7
+      },
+      "floors": {
+        "Ground Floor": ["1101-1109"],
+        "1st Floor": ["1111-1119"],
+        "2nd Floor": ["1121-1129"]
+      },
+      "features": "All rooms feature showers. Bed types vary (DBL/2M, 3M, 4M, SOFA)."
+    }
+  },
+  {
+    "id": 2,
+    "name": "BLOCK 1200",
+    "category": "Rooms",
+    "description": "ROOMS 1201-1218",
+    "distances": "Close to Reception (17). Far from Beach Area (29). Difficult access to Elia Main Restaurant (23).",
+    "room_details": {
+      "total_rooms": 16,
+      "types": {
+        "F1": 8,
+        "F2": 8
+      },
+      "floors": {
+        "Ground Floor": ["1201-1208"],
+        "1st Floor": ["1211-1218"]
+      },
+      "features": "Mix of Bath and Shower options with DBL/2HM/2M bed configurations."
+    }
+  },
+  {
+    "id": 3,
+    "name": "BLOCK 1300",
+    "category": "Rooms",
+    "description": "ROOMS 1301-1354",
+    "distances": "Close to Reception (17). By Aqua Pool Bar (19). Easy access to Elia Main Restaurant (23).",
+    "room_details": {
+      "total_rooms": 42,
+      "types": {
+        "F1": 11,
+        "F2": 17,
+        "FSUP": 5,
+        "F2 SUP": 6,
+        "DBL CLASSIC": 2
+      },
+      "floors": {
+        "Ground Floor": ["1301-1310", "1321-1324"],
+        "1st Floor": ["1311-1314", "1325-1334"],
+        "2nd Floor": ["1341-1354"]
+      }
+    }
+  },
+  {
+    "id": 4,
+    "name": "BLOCK 1400",
+    "category": "Rooms",
+    "description": "ROOMS 1401-1422",
+    "distances": "Close to Reception (17). Next to Waterslides (21). Easy access to Elia Main Restaurant (23).",
+    "room_details": {
+      "total_rooms": 18,
+      "types": {
+        "F1": 12,
+        "F2": 6
+      },
+      "floors": {
+        "Ground Floor": ["1401-1408"],
+        "1st Floor": ["1411-1418"],
+        "2nd Floor": ["1421-1422"]
+      }
+    }
+  },
+  {
+    "id": 5,
+    "name": "BLOCK 1500",
+    "category": "Rooms",
+    "description": "ROOMS 1501-1517",
+    "distances": "Close to Reception (17). Next to Waterslides (21). Far from Beach Area (29).",
+    "room_details": {
+      "total_rooms": 14,
+      "types": {
+        "F1": 10,
+        "F2": 4
+      },
+      "floors": {
+        "Ground Floor": ["1501-1507"],
+        "1st Floor": ["1511-1517"]
+      }
+    }
+  },
+  {
+    "id": 6,
+    "name": "BLOCK 1600",
+    "category": "Rooms",
+    "description": "ROOMS 1601-1616",
+    "distances": "Close to Reception (17). Far from Beach Area (29).",
+    "room_details": {
+      "total_rooms": 12,
+      "types": {
+        "F1": 8,
+        "F2": 4
+      },
+      "floors": {
+        "Ground Floor": ["1601-1606"],
+        "1st Floor": ["1611-1616"]
+      }
+    }
+  },
+  {
+    "id": 7,
+    "name": "BLOCK 1700",
+    "category": "Rooms",
+    "description": "ROOMS 1701-1722",
+    "distances": "Next to Reception (17). Far from Beach Area (29).",
+    "room_details": {
+      "total_rooms": 18,
+      "types": {
+        "F1": 12,
+        "F2": 6
+      },
+      "floors": {
+        "Ground Floor": ["1701-1708"],
+        "1st Floor": ["1711-1718"],
+        "2nd Floor": ["1721-1722"]
+      }
+    }
+  },
+  {
+    "id": 8,
+    "name": "BLOCK 1800",
+    "category": "Rooms",
+    "description": "ROOMS 1801-1827",
+    "distances": "Next to Reception (17). Far from Beach Area (29).",
+    "room_details": {
+      "total_rooms": 21,
+      "types": {
+        "F1": 10,
+        "F2": 6,
+        "FSG": 5
+      },
+      "floors": {
+        "Ground Floor": ["1802-1807"],
+        "1st Floor": ["1812-1817"],
+        "2nd Floor": ["1821-1827"]
+      }
+    }
+  },
+  {
+    "id": 9,
+    "name": "BLOCK 1900",
+    "category": "Rooms",
+    "description": "ROOMS 1901-1912",
+    "distances": "Close to Reception (17). Difficult access to Beach Area (29).",
+    "room_details": {
+      "total_rooms": 4,
+      "types": {
+        "F1": 4
+      },
+      "floors": {
+        "Ground Floor": ["1901-1902"],
+        "1st Floor": ["1911-1912"]
+      }
+    }
+  },
+  {
+    "id": 10,
+    "name": "BLOCK 2000",
+    "category": "Rooms",
+    "description": "ROOMS 2001-2514",
+    "distances": "Next to Elia Main Restaurant (23). Easy access to Beach Area (29). Far from Reception (17).",
+    "room_details": {
+      "total_rooms": 90,
+      "views": "Side Sea View, Garden View, Stream View, Front View, Back Side",
+      "features": "Triple Twin Room, Double Room Plus Single Bed, Double Room New Set, Triple Room With Bath, Disabled Friendly",
+      "floors": {
+        "Ground Floor": ["2001-2016", "2101-2114"],
+        "1st Floor": ["2201-2216", "2301-2314"],
+        "2nd Floor": ["2401-2416", "2501-2514"]
+      }
+    }
+  },
+  {
+    "id": 11,
+    "name": "BLOCK 3000",
+    "category": "Rooms",
+    "description": "ROOMS 3101-3135",
+    "distances": "Next to Elia Main Restaurant (23). Easy access to Beach Area (29). Far from Reception (17).",
+    "room_details": {
+      "total_rooms": 34,
+      "views": "Side Sea View, Garden View, Blind Sea View, Problematic View, Roof View",
+      "features": "Fam Room, Triple Twin Room",
+      "floors": {
+        "Level": ["3103-3135"]
+      }
+    }
+  },
+  {
+    "id": 12,
+    "name": "BLOCK 4000",
+    "category": "Rooms",
+    "description": "ROOMS 4001-4516",
+    "distances": "Next to Elia Main Restaurant (23). Close to Beach Area (29). Far from Reception (17).",
+    "room_details": {
+      "total_rooms": 96,
+      "views": "Side Sea View, Garden View, Pool View, PV SSV, Back View",
+      "features": "Triple Twin Room, Double Room Plus Single Bed, Twin Room",
+      "twin_beds": [
+        "4201", "4202", "4203", "4204", "4207", "4208", "4211", "4212", "4215", "4216",
+        "4301", "4302", "4303", "4304", "4307", "4308", "4311", "4312", "4315", "4316"
+      ],
+      "floors": {
+        "Ground Floor": ["4001-4016", "4201-4216", "4401-4416"],
+        "1st Floor": ["4101-4116", "4301-4316", "4501-4516"]
+      }
+    }
+  },
+  {
+    "id": 13,
+    "name": "BLOCK 5000",
+    "category": "Rooms",
+    "description": "ROOMS 5001-5520",
+    "distances": "Close to Elia Main Restaurant (23). Close to Beach Area (29). Far from Reception (17).",
+    "room_details": {
+      "total_rooms": 116,
+      "views": "Garden View, Side Sea View",
+      "features": "Double Room Plus Single Bed, Shower",
+      "floors": {
+        "Ground Floor": ["5001-5020", "5201-5218", "5401-5420"],
+        "1st Floor": ["5101-5120", "5301-5318", "5501-5520"]
+      }
+    }
+  },
+  {
+    "id": 14,
+    "name": "BLOCK 6000",
+    "category": "Rooms",
+    "description": "ROOMS 6001-6226",
+    "distances": "Easy access to Beach Area (29). Far from Reception (17).",
+    "room_details": {
+      "total_rooms": 78,
+      "views": "Back View, Garden View, Side Sea View",
+      "features": "Double + Single, Shower",
+      "floors": {
+        "Ground Floor": ["6001-6026"],
+        "1st Floor": ["6101-6126"],
+        "2nd Floor": ["6201-6226"]
+      }
+    }
+  },
+  {
+    "id": 15,
+    "name": "BLOCK 7000",
+    "category": "Rooms",
+    "description": "ROOMS 7001-7141",
+    "distances": "Close to Beach Area (29). Easy access to Elia Main Restaurant (23). Far from Reception (17).",
+    "room_details": {
+      "total_rooms": 79,
+      "types": {
+        "Twin Room": 19,
+        "Double Room": 43,
+        "Suite": 17
+      },
+      "views": "Side Sea View, Hide Sea View, Pool View, Back View",
+      "floors": {
+        "Ground Floor": ["7001-7041"],
+        "1st Floor": ["7101-7141"]
+      }
+    }
+  },
+  {
+    "id": 16,
+    "name": "BLOCK 8000",
+    "category": "Rooms",
+    "description": "ROOMS 8001-8211",
+    "distances": "Close to Elia Main Restaurant (23). Far from Reception (17) and Beach Area (29).",
+    "room_details": {
+      "total_rooms": 30,
+      "types": {
+        "Twin Room": 2,
+        "Double Room": 18,
+        "Suites": 10
+      },
+      "views": "Sea View, Garden View, Side Sea View",
+      "features": "Owner Hidden Room",
+      "floors": {
+        "Ground Floor": ["8001-8011"],
+        "1st Floor": ["8101-8119"],
+        "2nd Floor": ["8200-8211"]
+      }
+    }
+  },
+  {
+    "id": 17,
+    "name": "RECEPTION / MUSES Lobby Bar / IL GUSTO Italian Restaurant",
+    "category": "Facilities / Bars / Specialty Restaurants",
+    "distances": "Far from Beach Area (29). Easy access to Rooms 1100-1900.",
+    "operating_hours": {
+      "Muses Lobby Bar": "08:00 - 17:00",
+      "Il Gusto Italian Restaurant": "18:30 - 21:30"
+    },
+    "extra_info": "Front desk services: Guest Relations service available in the lobby area. To call reception dial 9. WiFi Network: Rizos Resorts (Password: rizosresorts). Il Gusto requires reservations and is part of the all-inclusive specialty restaurant program (minimum stay 7 days).",
+    "upgrade_rates_2026": {
+      "seasons": {
+        "low_mid": "06/04-30/06/2026 & 01/10-04/11/2026",
+        "high": "01/07-30/09/2026"
+      },
+      "sandy_beach_resort": {
+        "low_mid_season": {
+          "Classic Rooms GV": {"Classic Rooms SSV": 30, "Superior GV": 45, "Family F1G": 50, "Family F2G": 55, "FAMILY SUP.": 65, "Junior Suite GV": 70, "Junior Suite SV": 80},
+          "Classic Rooms SSV": {"Superior GV": 40, "Family F1G": 45, "Family F2G": 50, "FAMILY SUP.": 60, "Junior Suite GV": 65, "Junior Suite SV": 75},
+          "Superior Rooms GV": {"Family F1G": 40, "Family F2G": 45, "FAMILY SUP.": 55, "Junior Suite GV": 50, "Junior Suite SV": 55},
+          "Family Rooms 1bedroom": {"Family F2G": 40, "FAMILY SUP.": 50, "Junior Suite GV": 45, "Junior Suite SV": 50},
+          "Family 2 bedroom": {"FAMILY SUP.": 45, "Junior Suite GV": 40, "Junior Suite SV": 45},
+          "Superior Family Rooms": {"Junior Suite GV": 35, "Junior Suite SV": 40},
+          "Junior Suite GV": {"Junior Suite SV": 35}
+        },
+        "high_season": {
+          "Classic Rooms GV": {"Classic Rooms SSV": 40, "Superior GV": 55, "Family F1G": 60, "Family F2G": 65, "FAMILY SUP.": 75, "Junior Suite GV": 80, "Junior Suite SV": 85},
+          "Classic Rooms SSV": {"Superior GV": 50, "Family F1G": 55, "Family F2G": 60, "FAMILY SUP.": 70, "Junior Suite GV": 75, "Junior Suite SV": 80},
+          "Superior Rooms GV": {"Family F1G": 50, "Family F2G": 55, "FAMILY SUP.": 65, "Junior Suite GV": 70, "Junior Suite SV": 75},
+          "Family Rooms 1bedroom": {"Family F2G": 50, "FAMILY SUP.": 60, "Junior Suite GV": 65, "Junior Suite SV": 70},
+          "Family 2 bedroom": {"FAMILY SUP.": 55, "Junior Suite GV": 60, "Junior Suite SV": 65},
+          "Superior Family Rooms": {"Junior Suite GV": 50, "Junior Suite SV": 60},
+          "Junior Suite GV": {"Junior Suite SV": 55}
+        }
+      },
+      "sandy_villas_pool_suites": {
+        "low_mid_season": {
+          "Superior room pool view": {"Superior SUP": 60, "Junior Suite PV": 70, "Junior Suite SUP": 80, "Junior Suite SP": 180, "Grand Suite PP": 300},
+          "Superior room swim up": {"Junior Suite SUP": 60, "Junior Suite SP": 150, "Grand Suite PP": 250},
+          "Junior Suite Pool View": {"Junior Suite SUP": 70, "Junior Suite SP": 100, "Grand Suite PP": 200},
+          "Junior Suite swim up": {"Junior Suite SP": 80, "Grand Suite PP": 180},
+          "Junior Suite Semi Private Pool": {"Grand Suite PP": 150}
+        },
+        "high_season": {
+          "Superior room pool view": {"Superior SUP": 80, "Junior Suite PV": 90, "Junior Suite SUP": 100, "Junior Suite SP": 200, "Grand Suite PP": 350},
+          "Superior room swim up": {"Junior Suite SUP": 80, "Junior Suite SP": 170, "Grand Suite PP": 300},
+          "Junior Suite Pool View": {"Junior Suite SUP": 90, "Junior Suite SP": 120, "Grand Suite PP": 250},
+          "Junior Suite swim up": {"Junior Suite SP": 100, "Grand Suite PP": 200},
+          "Junior Suite Semi Private Pool": {"Grand Suite PP": 180}
+        }
+      }
+    }
+  },
+  {
+    "id": 18,
+    "name": "SHOPPING CENTER / HAIRDRESSER",
+    "category": "Facilities",
+    "distances": "Next to Reception (17). Far from Beach Area (29)."
+  },
+  {
+    "id": 19,
+    "name": "AQUA Pool Bar / TOWELS KIOSK",
+    "category": "Facilities / Bars",
+    "distances": "Close to Reception (17). By Snack Corner (20). Easy access to Elia Main Restaurant (23).",
+    "operating_hours": {
+      "Aqua Pool Bar": "10:00 - 18:00",
+      "Pool": "10:00 - 18:00"
+    },
+    "extra_info": "Reservations for sun beds and inflatables will not be accepted. Follow lifeguard instructions."
+  },
+  {
+    "id": 20,
+    "name": "SNACK CORNER",
+    "category": "Facilities / Food",
+    "distances": "By Waterslides (21). Easy access to Elia Main Restaurant (23).",
+    "operating_hours": {
+      "Snack Corner": "12:00 - 17:00"
+    },
+    "description": "Variety of comfort food options."
+  },
+  {
+    "id": 21,
+    "name": "WATERSLIDES / PLAYGROUND",
+    "category": "Facilities / Entertainment",
+    "distances": "Close to Reception (17). Easy access to Elia Main Restaurant (23). Far from Beach Area (29).",
+    "operating_hours": {
+      "Waterslides": "10:00 - 13:00 & 15:00 - 18:00",
+      "Mini club (ages 4-12)": "10:00 - 12:00 & 14:30 - 17:00"
+    },
+    "description": "Kids Playground, games, mini disco, kid's cinema, kid's tournaments. Children under 4 must be accompanied by an adult. Mini club operates 6 days per week."
+  },
+  {
+    "id": 22,
+    "name": "CONFERENCE ROOM / DOCTOR'S OFFICE",
+    "category": "Facilities",
+    "distances": "Close to Elia Main Restaurant (23). Far from Beach Area (29)."
+  },
+  {
+    "id": 23,
+    "name": "ELIA Main Restaurant",
+    "category": "Facilities / Restaurants",
+    "distances": "Easy access to Beach Area (29). Far from Reception (17).",
+    "operating_hours": {
+      "Early Breakfast": "06:00 - 07:00",
+      "Breakfast": "07:00 - 10:00",
+      "Lunch": "12:30 - 14:30",
+      "Dinner": "18:30 - 21:30"
+    },
+    "description": "Main Restaurant Buffet. Ice cream for children served at lunch and dinner time."
+  },
+  {
+    "id": 24,
+    "name": "GAME CENTER / GYM",
+    "category": "Facilities / Recreation",
+    "distances": "Next to Block 3000 (11). Close to Elia Main Restaurant (23).",
+    "operating_hours": {
+      "Fitness & Recreation": "10:00 - 20:00"
+    },
+    "extra_info": "Game center requires extra charge (€). Spa services include customized spa treatments & Sauna (€) - contact Spa Reception."
+  },
+  {
+    "id": 25,
+    "name": "NAVIO Pool Bar",
+    "category": "Facilities / Bars",
+    "distances": "Close to Beach Area (29). Far from Reception (17).",
+    "operating_hours": {
+      "Navio Pool Bar": "10:00 - 01:00"
+    }
+  },
+  {
+    "id": 26,
+    "name": "AMPHITHEATRE",
+    "category": "Facilities / Entertainment",
+    "distances": "Close to Beach Area (29). Far from Reception (17).",
+    "description": "Evening Entertainment: Various shows, Live music. Multilingual animators perform daily shows in the Amphitheatre for all guests."
+  },
+  {
+    "id": 27,
+    "name": "KYMA Beach Bar",
+    "category": "Facilities / Bars",
+    "distances": "Next to Beach Area (29). Far from Reception (17).",
+    "operating_hours": {
+      "Kyma Beach Bar": "10:00 - 01:00"
+    }
+  },
+  {
+    "id": 28,
+    "name": "AMMOS Mediterranean Restaurant",
+    "category": "Facilities / Restaurants",
+    "distances": "Next to Beach Area (29). Far from Reception (17).",
+    "operating_hours": {
+      "Breakfast": "07:00 - 10:00",
+      "Late Breakfast": "10:00 - 11:00",
+      "Lunch": "13:00 - 16:00",
+      "Dinner (Specialty)": "18:30 - 21:30"
+    },
+    "extra_info": "Dress code applies: Casual, Smart casual. Shorts and beach clothes are not allowed. Dinner requires reservation as part of the specialty restaurant program."
+  },
+  {
+    "id": 29,
+    "name": "BEACH AREA",
+    "category": "Facilities / Recreation",
+    "distances": "Far from Reception (17). Easy access to Elia Main Restaurant (23).",
+    "description": "Daytime activities: Aerobics, Water aerobics, Beach Volleyball, Pétanque.",
+    "extra_info": "Water sports available at an extra charge (€): fly fish, banana, ringo, canoe, parasailing, speed boats, jet ski, water cycle, fly board (provided by external companies)."
+  },
+  {
+    "id": 30,
+    "name": "BASKETBALL & FIVE-A-SIDE FOOTBALL",
+    "category": "Facilities / Recreation",
+    "distances": "Close to Reception (17). Difficult access to Beach Area (29).",
+    "description": "Sports facilities."
+  },
+  {
+    "id": 31,
+    "name": "GELATERIA / SHOPPING CENTER",
+    "category": "Facilities / Food",
+    "distances": "Next to Beach Area (29). Far from Reception (17).",
+    "description": "Variety of ice cream and branded coffee.",
+    "extra_info": "Gelateria items carry an extra charge (€)."
+  },
+  {
+    "id": 32,
+    "name": "APERITIVO Bar",
+    "category": "Facilities / Bars",
+    "distances": "Next to Reception (17). Far from Beach Area (29).",
+    "operating_hours": {
+      "Aperitivo Bar": "18:00 - 00:00"
+    }
+  },
+  {
+    "id": 33,
+    "name": "BLOCK 100",
+    "category": "Rooms / Pool Suites",
+    "description": "ROOMS 101-106",
+    "distances": "Not plotted on map. Difficult access to Beach Area (29).",
+    "features": "Semi Private Pool"
+  },
+  {
+    "id": 34,
+    "name": "BLOCK 200",
+    "category": "Rooms / Pool Suites",
+    "description": "ROOMS 201-206",
+    "distances": "Not plotted on map. Difficult access to Beach Area (29).",
+    "features": "Semi Private Pool"
+  },
+  {
+    "id": 35,
+    "name": "BLOCK 300",
+    "category": "Rooms / Pool Suites",
+    "description": "ROOMS 301-304",
+    "distances": "Not plotted on map. Difficult access to Beach Area (29).",
+    "features": "Semi Private Pool"
+  },
+  {
+    "id": 36,
+    "name": "BLOCK 400",
+    "category": "Rooms / Pool Suites",
+    "description": "ROOMS 401-411",
+    "distances": "Not plotted on map. Difficult access to Beach Area (29).",
+    "features": "Semi Private Pool"
+  },
+  {
+    "id": 37,
+    "name": "BLOCK 500",
+    "category": "Rooms / Pool Suites",
+    "description": "ROOMS 501-505",
+    "distances": "Not plotted on map. Difficult access to Beach Area (29).",
+    "features": "Semi Private Pool"
+  },
+  {
+    "id": 38,
+    "name": "BLOCK 600",
+    "category": "Rooms / Pool Suites",
+    "description": "ROOMS 601-672",
+    "distances": "Not plotted on map. Difficult access to Beach Area (29).",
+    "features": "Private Pool"
+  },
+  {
+    "id": 39,
+    "name": "BLOCK 700",
+    "category": "Rooms / Pool Suites",
+    "description": "ROOMS 701-732",
+    "distances": "Not plotted on map. Difficult access to Beach Area (29).",
+    "features": "Private Pool"
+  },
+  {
+    "id": 40,
+    "name": "BLOCK 800",
+    "category": "Rooms / Pool Suites",
+    "description": "ROOMS 801-832",
+    "distances": "Not plotted on map. Difficult access to Beach Area (29).",
+    "features": "Private Pool"
+  },
+  {
+    "id": 41,
+    "name": "Unlisted",
+    "category": "None",
+    "description": "Node number skipped in the resort map legend.",
+    "distances": "Not plotted on map. Difficult access to Beach Area (29)."
+  },
+  {
+    "id": 42,
+    "name": "TENNIS COURT",
+    "category": "Facilities / Recreation",
+    "distances": "Close to Reception (17). Far from Beach Area (29)."
+  },
+  {
+    "id": 43,
+    "name": "MARE Adults Only Pool Bar",
+    "category": "Facilities / Bars",
+    "distances": "Next to Beach Area (29). Far from Reception (17).",
+    "operating_hours": {
+      "Mare Pool Bar": "10:00 - 18:00"
+    },
+    "description": "Local drinks with and without alcohol. Signature cocktails and branded drinks available at an additional charge."
+  },
+  {
+    "id": 44,
+    "name": "ERMIS GYRO Greek Restaurant",
+    "category": "Facilities / Specialty Restaurants",
+    "distances": "Far from Reception (17). Difficult access to Beach Area (29) and Elia Main Restaurant (23).",
+    "operating_hours": {
+      "Ermis Gyro": "18:30 - 21:30"
+    },
+    "description": "Gyro specialty restaurant.",
+    "extra_info": "Reservations required. Included in the specialty restaurant minimum stay program."
+  }
+]

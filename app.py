@@ -19,9 +19,15 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem, QHeaderView, QGroupBox, QLineEdit,
     QComboBox, QMessageBox
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QPoint
 from PyQt6.QtGui import QColor, QFont
 
+import collections
+from pathlib import Path
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+
+from plot_viewer import PlotGraphWindow
 from offers_module import (
     execute_offers_pipeline, get_todays_offer_list, 
     duplicate_for_update, ARRIVALS_FOLDER, log_task
@@ -32,20 +38,55 @@ from data_manager import (
     CHECKOUTS_JSON, ROOM_MOVES_JSON, ARRIVALS_BEACH_PATH,
     DEPARTURES_BEACH_PATH, BOOKING_CALLS_TODAY_JSON,
     DATABASE_DIR, TEMPLATES_DIR, OUTPUT_DIR, TRASH_DIR, BASE_DIR,
+    PLOT_DIR, HOTEL_DATASET_PATH,
     ensure_workspace_directories, resolve_template_path,
-    DEFAULT_PROPERTY, run_gatekeeper_if_needed
+    DEFAULT_PROPERTY, run_gatekeeper_if_needed,
+    validate_inhouse_file_date, extract_inhouse_report_date
 )
 
 
-class Sidebar(QScrollArea):
+class HamburgerButton(QPushButton):
+    hovered = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__("☰", parent)
+        self.setObjectName("btn_hamburger")
+        self.setToolTip("Options Menu")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedSize(36, 32)
+        self.setStyleSheet("""
+            QPushButton#btn_hamburger {
+                background-color: #FFC0CB;
+                border: 1px solid #FF69B4;
+                border-radius: 4px;
+                font-size: 18px;
+                font-weight: bold;
+                color: #800020;
+                padding: 0px;
+                text-align: center;
+            }
+            QPushButton#btn_hamburger:hover {
+                background-color: #FF69B4;
+                color: white;
+            }
+            QPushButton#btn_hamburger[active="true"] {
+                background-color: #FF69B4;
+                color: white;
+            }
+        """)
+
+    def enterEvent(self, event):
+        super().enterEvent(event)
+        self.hovered.emit()
+
+
+class Sidebar(QWidget):
     def __init__(self):
         super().__init__()
         self.setFixedWidth(180)
-        self.setWidgetResizable(True)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setObjectName("sidebar_root")
         self.setStyleSheet("""
+            QWidget#sidebar_root { background-color: #FFB6C1; }
             QScrollArea { background-color: #FFB6C1; border: none; }
             QWidget#sidebar_container { background-color: #FFB6C1; }
             QPushButton {
@@ -60,9 +101,34 @@ class Sidebar(QScrollArea):
             QPushButton[active="true"] { background-color: #FF69B4; color: white; }
             QLabel { font-weight: bold; padding: 10px; color: #B03060; }
         """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+
         self.container = QWidget()
         self.container.setObjectName("sidebar_container")
-        self.setWidget(self.container)
+        self.scroll_area.setWidget(self.container)
+        layout.addWidget(self.scroll_area, stretch=1)
+
+        # Bottom-left container for hamburger button
+        self.bottom_bar = QWidget()
+        self.bottom_bar.setObjectName("sidebar_bottom_bar")
+        self.bottom_bar.setStyleSheet("background-color: #FFB6C1;")
+        bottom_layout = QHBoxLayout(self.bottom_bar)
+        bottom_layout.setContentsMargins(12, 6, 12, 12)
+        bottom_layout.setSpacing(0)
+        bottom_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
+        self.btn_hamburger = HamburgerButton()
+        bottom_layout.addWidget(self.btn_hamburger)
+        layout.addWidget(self.bottom_bar, stretch=0)
 
 
 class TaskWidget(QWidget):
@@ -193,23 +259,116 @@ class OfficeViewer(QWidget):
 
 
 class ConfigurationWidget(QWidget):
-    """Configuration Page: system configuration inputs, directory path settings, and environment controls."""
+    """
+    Configuration View:
+    - Real-time timestamp and operational date display for the active In-House List.
+    - Safe hotel database purge ("Clear Hotel Database").
+    - Validated in-house file ingestion ("Load In-House List") with report timestamp security check.
+    - System configuration inputs and database topology paths.
+    """
+    data_updated = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.data_manager = InHouseDataManager()
         self._init_ui()
+        self.refresh_timestamp_display()
 
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(25, 25, 25, 25)
-        main_layout.setSpacing(18)
+        main_layout.setSpacing(16)
 
-        lbl_title = QLabel("⚙️ SYSTEM CONFIGURATION & ENVIRONMENT CONTROLS")
+        lbl_title = QLabel("⚙️ SYSTEM CONFIGURATION & HOTEL DATABASE CONTROLS")
         lbl_title.setStyleSheet("font-size: 18px; font-weight: bold; color: #800020;")
-        lbl_sub = QLabel("Configure workspace directory topology, active property targeting, and system environment controls.")
+        lbl_sub = QLabel("Configure workspace directory topology, active property targeting, and in-house database state.")
         lbl_sub.setStyleSheet("font-size: 12px; color: #555555;")
         main_layout.addWidget(lbl_title)
         main_layout.addWidget(lbl_sub)
 
+        # 1. In-House State & Ingestion Actions Group
+        grp_db = QGroupBox("Active In-House Database State & Synchronization")
+        grp_db.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                color: #800020;
+                border: 1px solid #FFB6C1;
+                border-radius: 6px;
+                margin-top: 10px;
+                padding-top: 15px;
+            }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
+        """)
+        layout_db = QVBoxLayout(grp_db)
+        layout_db.setSpacing(12)
+
+        # Timestamp Display Row
+        row_ts = QHBoxLayout()
+        lbl_ts_title = QLabel("Loaded In-House List:")
+        lbl_ts_title.setFixedWidth(160)
+        lbl_ts_title.setStyleSheet("font-weight: bold; color: #333333;")
+        self.txt_timestamp = QLineEdit("No In-House List Loaded")
+        self.txt_timestamp.setReadOnly(True)
+        self.txt_timestamp.setStyleSheet("background-color: #FEF2F2; color: #991B1B; font-weight: bold; padding: 6px 10px; border: 1px solid #FECACA; border-radius: 4px;")
+        row_ts.addWidget(lbl_ts_title)
+        row_ts.addWidget(self.txt_timestamp)
+        layout_db.addLayout(row_ts)
+
+        # Action Buttons Row
+        row_actions = QHBoxLayout()
+        row_actions.setSpacing(10)
+
+        self.btn_load_inhouse = QPushButton("📂 Load In-House List")
+        self.btn_load_inhouse.setStyleSheet("""
+            QPushButton {
+                background-color: #1E3A8A;
+                color: white;
+                font-weight: bold;
+                padding: 8px 18px;
+                border-radius: 4px;
+                border: none;
+            }
+            QPushButton:hover { background-color: #2563EB; }
+        """)
+        self.btn_load_inhouse.clicked.connect(self.load_inhouse_list)
+
+        self.btn_clear_db = QPushButton("🗑️ Clear Hotel Database")
+        self.btn_clear_db.setStyleSheet("""
+            QPushButton {
+                background-color: #B91C1C;
+                color: white;
+                font-weight: bold;
+                padding: 8px 18px;
+                border-radius: 4px;
+                border: none;
+            }
+            QPushButton:hover { background-color: #DC2626; }
+        """)
+        self.btn_clear_db.clicked.connect(self.clear_hotel_database)
+
+        self.btn_export_blocks = QPushButton("🔄 Refresh Block Exports")
+        self.btn_export_blocks.setStyleSheet("""
+            QPushButton {
+                background-color: #065F46;
+                color: white;
+                font-weight: bold;
+                padding: 8px 18px;
+                border-radius: 4px;
+                border: none;
+            }
+            QPushButton:hover { background-color: #059669; }
+        """)
+        self.btn_export_blocks.clicked.connect(self.refresh_block_exports)
+
+        row_actions.addWidget(self.btn_load_inhouse)
+        row_actions.addWidget(self.btn_clear_db)
+        row_actions.addWidget(self.btn_export_blocks)
+        row_actions.addStretch()
+        layout_db.addLayout(row_actions)
+
+        main_layout.addWidget(grp_db)
+
+        # 2. System Configuration Inputs
         grp_sys = QGroupBox("System Configuration Inputs")
         grp_sys.setStyleSheet("QGroupBox { font-weight: bold; color: #800020; border: 1px solid #FFB6C1; border-radius: 6px; margin-top: 10px; padding-top: 15px; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }")
         layout_sys = QVBoxLayout(grp_sys)
@@ -241,7 +400,7 @@ class ConfigurationWidget(QWidget):
 
         main_layout.addWidget(grp_sys)
 
-        # Directory Paths
+        # 3. Directory Paths Topology
         grp_paths = QGroupBox("Standardized Database Topology")
         grp_paths.setStyleSheet("QGroupBox { font-weight: bold; color: #800020; border: 1px solid #FFB6C1; border-radius: 6px; margin-top: 10px; padding-top: 15px; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }")
         layout_paths = QVBoxLayout(grp_paths)
@@ -252,7 +411,8 @@ class ConfigurationWidget(QWidget):
             ("Booking Calls Today:", BOOKING_CALLS_TODAY_JSON),
             ("Check-Out Records:", CHECKOUTS_JSON),
             ("Room Moves History:", ROOM_MOVES_JSON),
-            ("Sandy Beach Arrivals:", ARRIVALS_BEACH_PATH)
+            ("Sandy Beach Arrivals:", ARRIVALS_BEACH_PATH),
+            ("Plot & Block Exports:", PLOT_DIR)
         ]
         for label_text, p_val in paths_info:
             r_box = QHBoxLayout()
@@ -269,18 +429,113 @@ class ConfigurationWidget(QWidget):
         main_layout.addWidget(grp_paths)
         main_layout.addStretch()
 
+    def refresh_timestamp_display(self):
+        master = self.data_manager.load_master_state()
+        meta = self.data_manager.load_metadata()
+        sync_date = meta.get("last_sync_date") or meta.get("last_processed_date")
+        last_updated = meta.get("last_updated_at")
+
+        if master and sync_date:
+            ts_str = str(last_updated).split(".")[0].replace("T", " ") if last_updated else "N/A"
+            self.txt_timestamp.setText(f"Operational Date: {sync_date}  |  Last Synced: {ts_str}  ({len(master)} Active Bookings)")
+            self.txt_timestamp.setStyleSheet("background-color: #ECFDF5; color: #065F46; font-weight: bold; padding: 6px 10px; border: 1px solid #A7F3D0; border-radius: 4px;")
+        else:
+            self.txt_timestamp.setText("No In-House List Loaded")
+            self.txt_timestamp.setStyleSheet("background-color: #FEF2F2; color: #991B1B; font-weight: bold; padding: 6px 10px; border: 1px solid #FECACA; border-radius: 4px;")
+
+    def load_inhouse_list(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select In-House List",
+            BASE_DIR,
+            "In-House Files (*.xlsx *.xls *.csv);;CSV Files (*.csv);;Excel Files (*.xlsx *.xls);;All Files (*.*)"
+        )
+        if not file_path:
+            return
+
+        # 4. Timestamp Security & Ingestion Validator
+        is_valid, rep_date, msg = validate_inhouse_file_date(file_path, target_date=date.today())
+        if not is_valid:
+            QMessageBox.critical(
+                self,
+                "Validation Error",
+                f"{msg}\n\nIngestion has been aborted and the hotel database was not updated."
+            )
+            return
+
+        try:
+            parsed = self.data_manager.parse_in_house_file(file_path)
+            if not parsed:
+                QMessageBox.warning(self, "Empty Dataset", "No valid bookings were found in the selected file.")
+                return
+
+            summary = self.data_manager.compare_and_update(parsed, processing_date=rep_date)
+            self.refresh_timestamp_display()
+            self.data_updated.emit()
+
+            QMessageBox.information(
+                self,
+                "Ingestion Successful",
+                f"In-House List ingested successfully!\n\n"
+                f"• Operational Date: {rep_date.strftime('%Y-%m-%d')}\n"
+                f"• Active In-House Bookings: {summary['total_in_house']}\n"
+                f"• Room Moves Detected: {len(summary['room_moves'])}\n"
+                f"• Check-Outs Archived: {len(summary['check_outs'])}\n\n"
+                f"All Room Block JSON metrics have been synchronized in PLOT/."
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Ingestion Error", f"Failed to ingest In-House List:\n{str(e)}")
+
+    def clear_hotel_database(self):
+        reply = QMessageBox.question(
+            self,
+            "Clear Hotel Database?",
+            "Are you sure you want to clear the Hotel Database?\n\n"
+            "This will purge all transient room and guest records from DATABASE/HOTEL STATE/ "
+            "and reset current occupancy states. Templates and system configuration will remain intact.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self.data_manager.purge_hotel_database()
+                self.refresh_timestamp_display()
+                self.data_updated.emit()
+                QMessageBox.information(
+                    self,
+                    "Database Cleared",
+                    "Hotel transient database and occupancy states have been reset successfully."
+                )
+            except Exception as e:
+                QMessageBox.critical(self, "Purge Error", f"Failed to clear hotel database:\n{str(e)}")
+
+    def refresh_block_exports(self):
+        try:
+            res = self.data_manager.export_room_block_json_data()
+            self.data_updated.emit()
+            QMessageBox.information(
+                self,
+                "Export Complete",
+                f"Successfully exported {res['total_exported']} room block JSON payloads to PLOT/."
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Failed to export room blocks:\n{str(e)}")
+
 
 # =============================================================================
-# New Option: 📊 STATS (Live Operational Metrics Dashboard)
+# Option: 📊 STATS (Live Operational Metrics & Analytical Dashboard)
 # =============================================================================
 
 class StatsWidget(QWidget):
     """
-    Dedicated view in the main sidebar displaying live operational metrics directly from:
-      - DATABASE/HOTEL STATE/master_state.json: Total Active In-House Guests & Occupancy count
-      - DATABASE/CHECK OUT HISTORY/checkouts.json: Total Check-Outs Today & Total Check-Outs Archived
-      - DATABASE/ROOM MOVES/room_moves.json: Total Room Moves Archived
-      - DATABASE/HOTEL STATE/state_metadata.json: Last Sync Date & Timestamp
+    Dedicated view displaying live operational metrics and analytical visualizations:
+      - 4-Chart Matplotlib Analytics Suite:
+          1. Occupancy Rate per Room Block (bar chart)
+          2. Room Category Distribution (donut chart)
+          3. Arrivals vs. In-House vs. Departures (turnover chart)
+          4. Geographic / Agency Breakdown (horizontal bar chart)
+      - KPI summary cards
+      - Active In-House Guest Manifest table with search filter
     """
 
     def __init__(self, parent=None):
@@ -291,22 +546,22 @@ class StatsWidget(QWidget):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
         # Header
         top_bar = QHBoxLayout()
         v_title = QVBoxLayout()
-        lbl_title = QLabel("📊 OPERATIONAL METRICS & HOTEL STATE")
+        lbl_title = QLabel("📊 OPERATIONAL METRICS & HOTEL ANALYTICS")
         lbl_title.setStyleSheet("font-size: 20px; font-weight: bold; color: #800020;")
-        lbl_sub = QLabel("Real-time occupancy, departures, room moves, and synchronization status for Sandy Beach.")
+        lbl_sub = QLabel("Real-time occupancy analytics, room block performance, turnover, and market breakdown.")
         lbl_sub.setStyleSheet("font-size: 12px; color: #555555;")
         v_title.addWidget(lbl_title)
         v_title.addWidget(lbl_sub)
         top_bar.addLayout(v_title)
         top_bar.addStretch()
 
-        btn_refresh = QPushButton("🔄 Refresh Stats")
+        btn_refresh = QPushButton("🔄 Refresh Analytics")
         btn_refresh.setStyleSheet("""
             QPushButton {
                 background-color: #800020;
@@ -324,7 +579,7 @@ class StatsWidget(QWidget):
 
         # KPI Cards Row
         kpi_row = QHBoxLayout()
-        kpi_row.setSpacing(14)
+        kpi_row.setSpacing(12)
 
         self.card_inhouse = self._create_kpi_card("👥 Active In-House", "0 Bookings", "0 Guests", "#1E3A8A")
         self.card_checkouts = self._create_kpi_card("🚪 Check-Outs", "0 Today", "0 Total Archived", "#065F46")
@@ -337,7 +592,30 @@ class StatsWidget(QWidget):
         kpi_row.addWidget(self.card_sync)
         layout.addLayout(kpi_row)
 
-        # Table Filter & Label
+        # Tabs: Analytics Dashboard vs Guest Manifest Table
+        self.tabs = QTabWidget()
+        self.tabs.setStyleSheet("""
+            QTabWidget::pane { border: 1px solid #FFB6C1; background: white; border-radius: 6px; }
+            QTabBar::tab { background: #FFE4E1; border: 1px solid #FFB6C1; padding: 8px 18px; margin-right: 3px; font-weight: bold; border-top-left-radius: 4px; border-top-right-radius: 4px; }
+            QTabBar::tab:selected { background: #800020; color: white; border-color: #800020; }
+        """)
+
+        # Tab 1: Matplotlib Charts Canvas
+        self.tab_charts = QWidget()
+        tc_layout = QVBoxLayout(self.tab_charts)
+        tc_layout.setContentsMargins(4, 4, 4, 4)
+
+        self.figure = Figure(figsize=(11, 7), dpi=100, facecolor="#FAF9F6")
+        self.canvas = FigureCanvas(self.figure)
+        tc_layout.addWidget(self.canvas)
+        self.tabs.addTab(self.tab_charts, "📈 Visual Analytics Suite")
+
+        # Tab 2: Guest Manifest Table
+        self.tab_table = QWidget()
+        tt_layout = QVBoxLayout(self.tab_table)
+        tt_layout.setContentsMargins(12, 12, 12, 12)
+        tt_layout.setSpacing(10)
+
         tbl_bar = QHBoxLayout()
         lbl_table_header = QLabel("Active In-House Guest Manifest")
         lbl_table_header.setStyleSheet("font-size: 15px; font-weight: bold; color: #2C3E50;")
@@ -347,11 +625,11 @@ class StatsWidget(QWidget):
         self.txt_search = QLineEdit()
         self.txt_search.setPlaceholderText("🔍 Filter Room, Guest, or Booking ID...")
         self.txt_search.setFixedWidth(260)
+        self.txt_search.setStyleSheet("padding: 5px 8px; border: 1px solid #FFB6C1; border-radius: 4px; background: white;")
         self.txt_search.textChanged.connect(self._filter_table)
         tbl_bar.addWidget(self.txt_search)
-        layout.addLayout(tbl_bar)
+        tt_layout.addLayout(tbl_bar)
 
-        # In-House Table
         self.table_inhouse = QTableWidget(0, 6)
         self.table_inhouse.setHorizontalHeaderLabels([
             "Room", "Booking ID", "Guest Name(s)", "Arrival", "Departure", "Debtor / Agency"
@@ -363,7 +641,10 @@ class StatsWidget(QWidget):
         self.table_inhouse.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.table_inhouse.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         self.table_inhouse.setAlternatingRowColors(True)
-        layout.addWidget(self.table_inhouse, stretch=1)
+        tt_layout.addWidget(self.table_inhouse)
+
+        self.tabs.addTab(self.tab_table, "📋 Guest Manifest Table")
+        layout.addWidget(self.tabs, stretch=1)
 
     def _create_kpi_card(self, title: str, main_stat: str, sub_stat: str, accent_color: str) -> QFrame:
         card = QFrame()
@@ -399,6 +680,7 @@ class StatsWidget(QWidget):
         meta = self.data_manager.load_metadata()
         checkouts = self.data_manager.load_checkouts_history()
         moves = self.data_manager.load_room_moves_history()
+        arrivals = self.data_manager.load_arrivals_state()
 
         # In-House Counts
         total_bookings = len(master)
@@ -410,7 +692,7 @@ class StatsWidget(QWidget):
         self.card_inhouse.lbl_sub.setText(f"{total_guests} Total In-House Guests")
 
         # Checkouts
-        co_records = checkouts.get("records", [])
+        co_records = checkouts.get("records", []) if isinstance(checkouts, dict) else []
         today_str = date.today().strftime("%d/%m/%Y")
         today_cos = sum(1 for c in co_records if str(c.get("checkout_date", "")).startswith(today_str))
         self.card_checkouts.lbl_main.setText(f"{today_cos} Today")
@@ -428,7 +710,7 @@ class StatsWidget(QWidget):
         self.card_sync.lbl_main.setText(str(last_dt))
         self.card_sync.lbl_sub.setText(f"Updated: {last_ts}" if last_ts else "No update timestamp")
 
-        # Populate Table
+        # Populate Manifest Table
         self.table_inhouse.setRowCount(0)
         sorted_bookings = sorted(
             master.items(),
@@ -445,6 +727,155 @@ class StatsWidget(QWidget):
             self.table_inhouse.setItem(r, 3, QTableWidgetItem(str(b_data.get("Άφιξη", ""))))
             self.table_inhouse.setItem(r, 4, QTableWidgetItem(str(b_data.get("Αναχώρηση", ""))))
             self.table_inhouse.setItem(r, 5, QTableWidgetItem(str(b_data.get("Χρεώστης", b_data.get("agency", "")))))
+
+        # Re-render Matplotlib 4-Chart Suite
+        self._render_charts(master, arrivals, checkouts)
+
+    def _render_charts(self, master: Dict[str, Any], arrivals: Dict[str, Any], checkouts: Dict[str, Any]):
+        self.figure.clear()
+
+        # 2x2 Subplots Grid
+        axs = self.figure.subplots(2, 2)
+        ax1, ax2 = axs[0, 0], axs[0, 1]
+        ax3, ax4 = axs[1, 0], axs[1, 1]
+
+        # ---------------------------------------------------------------------
+        # Chart 1: Occupancy Rate per Room Block (1100 to 8000)
+        # ---------------------------------------------------------------------
+        target_blocks = [
+            "BLOCK 1100", "BLOCK 1200", "BLOCK 1300", "BLOCK 1400",
+            "BLOCK 1500", "BLOCK 1600", "BLOCK 1700", "BLOCK 1800",
+            "BLOCK 1900", "BLOCK 2000", "BLOCK 3000", "BLOCK 4000",
+            "BLOCK 5000", "BLOCK 6000", "BLOCK 7000", "BLOCK 8000"
+        ]
+        labels = [b.replace("BLOCK ", "") for b in target_blocks]
+        percentages = []
+        bar_colors = []
+
+        for b_name in target_blocks:
+            slug = re.sub(r"[^\w\d]+", "_", b_name.strip()).strip("_")
+            b_file = Path(PLOT_DIR) / slug / f"{slug}.json"
+            pct = 0.0
+            if b_file.exists():
+                try:
+                    with open(b_file, "r", encoding="utf-8") as f:
+                        b_data = json.load(f)
+                        pct = float(b_data.get("occupancy_metrics", {}).get("occupancy_percentage", 0.0))
+                except Exception:
+                    pass
+            percentages.append(pct)
+            if pct < 75:
+                bar_colors.append("#2563EB")
+            elif pct < 90:
+                bar_colors.append("#D97706")
+            else:
+                bar_colors.append("#DC2626")
+
+        bars = ax1.bar(labels, percentages, color=bar_colors, width=0.65, edgecolor="#1E293B", linewidth=0.5)
+        ax1.set_title("Occupancy Rate per Room Block (%)", fontsize=10, fontweight="bold", color="#800020", pad=6)
+        ax1.set_ylim(0, 115)
+        ax1.set_ylabel("Occupancy %", fontsize=8, color="#475569")
+        ax1.tick_params(axis="x", rotation=45, labelsize=7.5)
+        ax1.tick_params(axis="y", labelsize=7.5)
+        ax1.grid(axis="y", linestyle="--", alpha=0.4)
+        for bar, pct in zip(bars, percentages):
+            ax1.text(bar.get_x() + bar.get_width() / 2.0, bar.get_height() + 2, f"{pct:.0f}%",
+                     ha="center", va="bottom", fontsize=6.5, fontweight="bold", color="#1E293B")
+
+        # ---------------------------------------------------------------------
+        # Chart 2: Room Category Distribution (Donut Chart)
+        # ---------------------------------------------------------------------
+        room_types = collections.Counter()
+        for b in master.values():
+            rtype = b.get("Τύπος Δωμ") or b.get("Κρατηθείς Τύπος") or "Other"
+            guests_cnt = len(b.get("Πελάτες", [])) if isinstance(b.get("Πελάτες"), list) else 1
+            room_types[rtype] += guests_cnt
+
+        if room_types:
+            top_types = room_types.most_common(6)
+            other_cnt = sum(c for _, c in room_types.most_common()[6:])
+            if other_cnt > 0:
+                top_types.append(("Other", other_cnt))
+            pie_labels = [k for k, _ in top_types]
+            pie_vals = [v for _, v in top_types]
+            colors = ["#2563EB", "#7C3AED", "#059669", "#D97706", "#DC2626", "#EC4899", "#64748B"]
+            wedges, texts, autotexts = ax2.pie(
+                pie_vals, labels=pie_labels, autopct="%1.0f%%", pctdistance=0.75,
+                colors=colors[:len(pie_vals)], wedgeprops=dict(width=0.45, edgecolor="white", linewidth=1.5),
+                textprops=dict(fontsize=7.5, fontweight="bold")
+            )
+            for at in autotexts:
+                at.set_fontsize(7)
+                at.set_color("white")
+            ax2.set_title("Guest Room Category Distribution", fontsize=10, fontweight="bold", color="#800020", pad=6)
+        else:
+            ax2.text(0.5, 0.5, "No In-House Data", ha="center", va="center", color="#94A3B8")
+            ax2.set_title("Guest Room Category Distribution", fontsize=10, fontweight="bold", color="#800020")
+
+        # ---------------------------------------------------------------------
+        # Chart 3: Operational Turnover (Arrivals vs. In-House vs. Departures)
+        # ---------------------------------------------------------------------
+        arr_cnt = 0
+        if isinstance(arrivals, dict):
+            arr_bookings = arrivals.get("bookings", arrivals.get("arrivals", {}))
+            arr_cnt = len(arr_bookings) if isinstance(arr_bookings, dict) else len(arrivals)
+
+        inhouse_cnt = len(master)
+
+        co_records = checkouts.get("records", []) if isinstance(checkouts, dict) else []
+        today_str = date.today().strftime("%d/%m/%Y")
+        today_cos = sum(1 for c in co_records if str(c.get("checkout_date", "")).startswith(today_str))
+
+        flow_labels = ["Arrivals", "In-House", "Departures"]
+        flow_vals = [arr_cnt, inhouse_cnt, today_cos]
+        flow_colors = ["#3B82F6", "#10B981", "#EF4444"]
+
+        f_bars = ax3.bar(flow_labels, flow_vals, color=flow_colors, width=0.55, edgecolor="#1E293B", linewidth=0.5)
+        ax3.set_title("Operational Turnover Overview", fontsize=10, fontweight="bold", color="#800020", pad=6)
+        ax3.set_ylabel("Count", fontsize=8, color="#475569")
+        ax3.tick_params(axis="x", labelsize=8)
+        ax3.tick_params(axis="y", labelsize=7.5)
+        ax3.grid(axis="y", linestyle="--", alpha=0.4)
+        for bar, val in zip(f_bars, flow_vals):
+            ax3.text(bar.get_x() + bar.get_width() / 2.0, bar.get_height() + (max(flow_vals) * 0.02 + 1), str(val),
+                     ha="center", va="bottom", fontsize=7.5, fontweight="bold", color="#1E293B")
+        if max(flow_vals) > 0:
+            ax3.set_ylim(0, max(flow_vals) * 1.18)
+
+        # ---------------------------------------------------------------------
+        # Chart 4: Geographic / Agency / Market Breakdown
+        # ---------------------------------------------------------------------
+        agencies = collections.Counter()
+        for b in master.values():
+            agency = b.get("Χρεώστης") or b.get("agency") or "Unknown"
+            guests_cnt = len(b.get("Πελάτες", [])) if isinstance(b.get("Πελάτες"), list) else 1
+            agencies[agency] += guests_cnt
+
+        if agencies:
+            top_agencies = agencies.most_common(7)
+            top_agencies.reverse()
+            ag_names = [a[0][:20] + "..." if len(a[0]) > 20 else a[0] for a in top_agencies]
+            ag_counts = [a[1] for a in top_agencies]
+            h_bars = ax4.barh(ag_names, ag_counts, color="#4F46E5", height=0.6, edgecolor="#1E293B", linewidth=0.5)
+            ax4.set_title("Top Debtor / Agency Distribution", fontsize=10, fontweight="bold", color="#800020", pad=6)
+            ax4.set_xlabel("Guests", fontsize=8, color="#475569")
+            ax4.tick_params(axis="y", labelsize=7.5)
+            ax4.tick_params(axis="x", labelsize=7.5)
+            ax4.grid(axis="x", linestyle="--", alpha=0.4)
+            for bar, val in zip(h_bars, ag_counts):
+                ax4.text(bar.get_width() + 2, bar.get_y() + bar.get_height() / 2.0, str(val),
+                         ha="left", va="center", fontsize=7, fontweight="bold", color="#1E293B")
+            if max(ag_counts) > 0:
+                ax4.set_xlim(0, max(ag_counts) * 1.15)
+        else:
+            ax4.text(0.5, 0.5, "No In-House Data", ha="center", va="center", color="#94A3B8")
+            ax4.set_title("Top Debtor / Agency Distribution", fontsize=10, fontweight="bold", color="#800020")
+
+        try:
+            self.figure.tight_layout(pad=1.8)
+        except Exception:
+            self.figure.subplots_adjust(top=0.92, bottom=0.08, left=0.08, right=0.95, hspace=0.35, wspace=0.25)
+        self.canvas.draw()
 
     def _filter_table(self):
         query = self.txt_search.text().strip().lower()
@@ -915,6 +1346,7 @@ class GuestRelationApp(QMainWindow):
         self.resize(1240, 820)
         self.setStyleSheet("QMainWindow { background-color: #FFF0F5; }")
         
+        self.plot_window = None
         self.mail_references = []
         self.active_tasks = {}
         self.is_update_mode = False
@@ -923,11 +1355,11 @@ class GuestRelationApp(QMainWindow):
         self.log_categories = [
             "All Activity",
             "To Do List",
-            "1. OFFERS",
-            "2. ALLERGIES",
-            "3. CAKE MEMOS",
-            "4. Booking Calls",
-            "5. ALL DATA"
+            "OFFERS",
+            "ALLERGIES",
+            "CAKE MEMOS",
+            "Booking Calls",
+            "ALL DATA"
         ]
         
         self.com_timer = QTimer()
@@ -953,27 +1385,26 @@ class GuestRelationApp(QMainWindow):
         sidebar_layout = QVBoxLayout(self.sidebar.container)
         sidebar_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         
-        self.btn_config = QPushButton("⚙️ Configuration")
-        self.btn_stats = QPushButton("📊 STATS")
-        self.btn_moves = QPushButton("🔄 MOVES")
-        self.btn_todo = QPushButton("☰ To Do List")
-        self.btn_offers = QPushButton("1. OFFERS")
+        self.btn_todo = QPushButton("To Do List")
+        self.btn_offers = QPushButton("OFFERS")
         
         # Sub-Menu for OFFERS
         self.offers_submenu = QWidget()
         offers_submenu_layout = QVBoxLayout(self.offers_submenu)
-        offers_submenu_layout.setContentsMargins(0, 2, 0, 4)
-        offers_submenu_layout.setSpacing(4)
+        offers_submenu_layout.setContentsMargins(0, 4, 0, 6)
+        offers_submenu_layout.setSpacing(5)
         self.offers_submenu.setStyleSheet("""
             QWidget { background-color: transparent; }
             QPushButton {
                 background-color: #FFE4E1;
                 border: 1px solid #FFB6C1;
-                padding: 6px 8px 6px 20px;
+                border-radius: 4px;
+                padding: 7px 10px 7px 20px;
                 text-align: left;
                 font-size: 11px;
                 font-weight: bold;
                 color: black;
+                margin-bottom: 2px;
             }
             QPushButton:hover { background-color: #FF69B4; color: white; }
         """)
@@ -988,11 +1419,13 @@ class GuestRelationApp(QMainWindow):
             QPushButton {
                 background-color: #B0E0E6; 
                 border: 1px solid #4682B4; 
-                padding: 6px 8px 6px 20px; 
+                border-radius: 4px;
+                padding: 7px 10px 7px 20px; 
                 text-align: left; 
                 font-size: 11px; 
                 font-weight: bold; 
-                color: black;
+                color: #0F3460;
+                margin-bottom: 2px;
             }
             QPushButton:hover { background-color: #4682B4; color: white; }
         """
@@ -1008,19 +1441,21 @@ class GuestRelationApp(QMainWindow):
 
         offers_submenu_layout.addWidget(self.offers_btn_create)
         offers_submenu_layout.addWidget(self.offers_btn_update)
+        # Visual separation gap between white and blue buttons
+        offers_submenu_layout.addSpacing(14)
         offers_submenu_layout.addWidget(self.btn_save)
         offers_submenu_layout.addWidget(self.btn_close)
         offers_submenu_layout.addWidget(self.btn_save_close)
         self.offers_submenu.hide()
 
-        self.btn_allergies = QPushButton("2. ALLERGIES")
-        self.btn_cake = QPushButton("3. CAKE MEMOS")
+        self.btn_allergies = QPushButton("ALLERGIES")
+        self.btn_cake = QPushButton("CAKE MEMOS")
 
         # Sub-Menu for CAKE MEMOS
         self.cake_submenu = QWidget()
         cake_submenu_layout = QVBoxLayout(self.cake_submenu)
-        cake_submenu_layout.setContentsMargins(0, 2, 0, 4)
-        cake_submenu_layout.setSpacing(4)
+        cake_submenu_layout.setContentsMargins(0, 4, 0, 6)
+        cake_submenu_layout.setSpacing(5)
         self.cake_submenu.setStyleSheet(self.offers_submenu.styleSheet())
 
         self.btn_cake_open_tpl = QPushButton("Open Cake Memo Template")
@@ -1038,44 +1473,70 @@ class GuestRelationApp(QMainWindow):
         self.btn_cake_save_close.clicked.connect(self.cake_office_viewer.save_and_close)
 
         cake_submenu_layout.addWidget(self.btn_cake_open_tpl)
+        # Visual separation gap between white and blue buttons
+        cake_submenu_layout.addSpacing(14)
         cake_submenu_layout.addWidget(self.btn_cake_save)
         cake_submenu_layout.addWidget(self.btn_cake_close)
         cake_submenu_layout.addWidget(self.btn_cake_save_close)
         self.cake_submenu.hide()
 
         self.btn_booking = QPushButton("BOOKING CALLS")
-        self.btn_system_data = QPushButton("📁 System Data Records")
-        self.btn_logs = QPushButton("📋 LOGS")
 
-        # Connect Sidebar Buttons
-        self.btn_config.clicked.connect(lambda: self.handle_category_click("CONFIG"))
-        self.btn_stats.clicked.connect(lambda: self.handle_category_click("STATS"))
-        self.btn_moves.clicked.connect(lambda: self.handle_category_click("MOVES"))
+        # Pop-out Menu triggered by bottom-left hamburger button
+        self.popout_menu = QMenu(self)
+        self.popout_menu.setObjectName("popout_menu")
+        self.popout_menu.setStyleSheet("""
+            QMenu {
+                background-color: #FFF0F5;
+                border: 1px solid #FF69B4;
+                border-radius: 6px;
+                padding: 4px;
+                font-weight: bold;
+                font-size: 12px;
+                color: #333333;
+            }
+            QMenu::item {
+                padding: 8px 24px 8px 14px;
+                border-radius: 4px;
+                margin: 2px 0px;
+            }
+            QMenu::item:selected {
+                background-color: #FF69B4;
+                color: #FFFFFF;
+            }
+        """)
+
+        self.action_stats = self.popout_menu.addAction("Stats")
+        self.action_plot = self.popout_menu.addAction("Plot")
+        self.action_config = self.popout_menu.addAction("Configuration")
+        self.action_system_data = self.popout_menu.addAction("System Data Records")
+        self.action_logs = self.popout_menu.addAction("Logs")
+
+        self.action_stats.triggered.connect(lambda: self.select_category("STATS"))
+        self.action_plot.triggered.connect(self.open_plot_window)
+        self.action_config.triggered.connect(lambda: self.select_category("CONFIG"))
+        self.action_system_data.triggered.connect(lambda: self.select_category("SYSTEM_DATA"))
+        self.action_logs.triggered.connect(lambda: self.select_category("LOGS"))
+
+        self.sidebar.btn_hamburger.clicked.connect(self.show_popout_menu)
+        self.sidebar.btn_hamburger.hovered.connect(self.show_popout_menu)
+
+        # Connect Main Sidebar Buttons
         self.btn_todo.clicked.connect(lambda: self.handle_category_click("TODO"))
         self.btn_offers.clicked.connect(lambda: self.handle_category_click("OFFERS"))
         self.btn_allergies.clicked.connect(lambda: self.handle_category_click("ALLERGIES"))
         self.btn_cake.clicked.connect(lambda: self.handle_category_click("CAKE"))
         self.btn_booking.clicked.connect(lambda: self.handle_category_click("BOOKING"))
-        self.btn_system_data.clicked.connect(lambda: self.handle_category_click("SYSTEM_DATA"))
-        self.btn_logs.clicked.connect(lambda: self.handle_category_click("LOGS"))
 
         self.menu_buttons = [
-            self.btn_config,
-            self.btn_stats,
-            self.btn_moves,
             self.btn_todo,
             self.btn_offers,
             self.btn_allergies,
             self.btn_cake,
             self.btn_booking,
-            self.btn_system_data,
-            self.btn_logs
         ]
 
         sidebar_layout.addWidget(QLabel("Menu"))
-        sidebar_layout.addWidget(self.btn_config)
-        sidebar_layout.addWidget(self.btn_stats)
-        sidebar_layout.addWidget(self.btn_moves)
         sidebar_layout.addWidget(self.btn_todo)
         sidebar_layout.addWidget(self.btn_offers)
         sidebar_layout.addWidget(self.offers_submenu)
@@ -1083,8 +1544,7 @@ class GuestRelationApp(QMainWindow):
         sidebar_layout.addWidget(self.btn_cake)
         sidebar_layout.addWidget(self.cake_submenu)
         sidebar_layout.addWidget(self.btn_booking)
-        sidebar_layout.addWidget(self.btn_system_data)
-        sidebar_layout.addWidget(self.btn_logs)
+        sidebar_layout.addStretch()
 
         # 0: Configuration View
         self.config_widget = ConfigurationWidget()
@@ -1136,6 +1596,10 @@ class GuestRelationApp(QMainWindow):
         self.booking_calls_widget.feedback_submitted.connect(self.handle_booking_feedback_to_todo)
         self.stacked_content.addWidget(self.booking_calls_widget)
 
+        # Cross-widget synchronization
+        self.config_widget.data_updated.connect(self.stats_widget.refresh_stats)
+        self.config_widget.data_updated.connect(self.booking_calls_widget.refresh_calls)
+
         # 8: System Data Records View
         self.system_data_widget = SystemDataRecordsWidget()
         self.stacked_content.addWidget(self.system_data_widget)
@@ -1178,7 +1642,31 @@ class GuestRelationApp(QMainWindow):
     def pump_com_messages(self):
         pythoncom.PumpWaitingMessages()
 
+    def show_popout_menu(self):
+        if hasattr(self, "popout_menu") and self.popout_menu.isVisible():
+            return
+        btn = self.sidebar.btn_hamburger
+        menu_size = self.popout_menu.sizeHint()
+        btn_global = btn.mapToGlobal(QPoint(0, 0))
+        target_x = btn_global.x()
+        target_y = btn_global.y() - menu_size.height() - 2
+        if target_y < 0:
+            target_y = btn_global.y() + btn.height() + 2
+        self.popout_menu.popup(QPoint(target_x, target_y))
+
+    def open_plot_window(self):
+        if self.plot_window is None or not self.plot_window.isVisible():
+            self.plot_window = PlotGraphWindow()
+            self.plot_window.show()
+        else:
+            self.plot_window.raise_()
+            self.plot_window.activateWindow()
+        self.add_log("All Activity", "Resort Node Graph Visualization (Plot) window opened.", "INFO")
+
     def add_log(self, category, message, level="INFO"):
+        clean_cat = re.sub(r"^\d+\.\s*", "", category)
+        target_cat = clean_cat if clean_cat in self.log_lists else (category if category in self.log_lists else None)
+
         now_str = datetime.now().strftime("%H:%M:%S")
         formatted_entry = f"[{now_str}] [{level}] {message}"
         color_map = {
@@ -1186,19 +1674,19 @@ class GuestRelationApp(QMainWindow):
             "WARNING": "#E65100", "INFO": "#1976D2"
         }
         text_color = color_map.get(level.upper(), "#333333")
-        if category in self.log_lists:
+        if target_cat and target_cat in self.log_lists:
             item = QListWidgetItem(formatted_entry)
             item.setForeground(QColor(text_color))
-            self.log_lists[category].addItem(item)
-            self.log_lists[category].scrollToBottom()
-        if category != "All Activity" and "All Activity" in self.log_lists:
-            all_entry = f"[{now_str}] [{category}] [{level}] {message}"
+            self.log_lists[target_cat].addItem(item)
+            self.log_lists[target_cat].scrollToBottom()
+        if target_cat != "All Activity" and "All Activity" in self.log_lists:
+            all_entry = f"[{now_str}] [{target_cat or category}] [{level}] {message}"
             all_item = QListWidgetItem(all_entry)
             all_item.setForeground(QColor(text_color))
             self.log_lists["All Activity"].addItem(all_item)
             self.log_lists["All Activity"].scrollToBottom()
         try:
-            log_task(f"[{category}] {message}", level)
+            log_task(f"[{target_cat or category}] {message}", level)
         except Exception:
             pass
 
@@ -1238,16 +1726,11 @@ class GuestRelationApp(QMainWindow):
 
     def update_sidebar_button_states(self):
         category_button_map = {
-            "CONFIG": self.btn_config,
-            "STATS": self.btn_stats,
-            "MOVES": self.btn_moves,
             "TODO": self.btn_todo,
             "OFFERS": self.btn_offers,
             "ALLERGIES": self.btn_allergies,
             "CAKE": self.btn_cake,
             "BOOKING": self.btn_booking,
-            "SYSTEM_DATA": self.btn_system_data,
-            "LOGS": self.btn_logs
         }
         active_btn = category_button_map.get(self.active_category, None)
         for btn in self.menu_buttons:
@@ -1256,14 +1739,12 @@ class GuestRelationApp(QMainWindow):
             btn.style().unpolish(btn)
             btn.style().polish(btn)
 
-    def handle_category_click(self, cat_key: str):
-        if getattr(self, "active_category", None) == cat_key:
-            self.active_category = None
-            self.collapse_all_submenus()
-            self.stacked_content.setCurrentWidget(self.empty_view)
-            self.update_sidebar_button_states()
-            return
+        is_popout_active = self.active_category in ["STATS", "CONFIG", "SYSTEM_DATA", "LOGS"]
+        self.sidebar.btn_hamburger.setProperty("active", is_popout_active)
+        self.sidebar.btn_hamburger.style().unpolish(self.sidebar.btn_hamburger)
+        self.sidebar.btn_hamburger.style().polish(self.sidebar.btn_hamburger)
 
+    def select_category(self, cat_key: str):
         self.active_category = cat_key
         self.collapse_all_submenus()
 
@@ -1272,9 +1753,6 @@ class GuestRelationApp(QMainWindow):
         elif cat_key == "STATS":
             self.stacked_content.setCurrentWidget(self.stats_widget)
             self.stats_widget.refresh_stats()
-        elif cat_key == "MOVES":
-            self.stacked_content.setCurrentWidget(self.moves_widget)
-            self.moves_widget.refresh_moves()
         elif cat_key == "TODO":
             self.stacked_content.setCurrentWidget(self.todo_list)
         elif cat_key == "OFFERS":
@@ -1297,6 +1775,16 @@ class GuestRelationApp(QMainWindow):
 
         self.update_sidebar_button_states()
 
+    def handle_category_click(self, cat_key: str):
+        if getattr(self, "active_category", None) == cat_key:
+            self.active_category = None
+            self.collapse_all_submenus()
+            self.stacked_content.setCurrentWidget(self.empty_view)
+            self.update_sidebar_button_states()
+            return
+
+        self.select_category(cat_key)
+
     # -------------------------------------------------------------------------
     # 1. OFFERS (Strictly Save to OUTPUT/OFFERS/ — No Outlook Generation)
     # -------------------------------------------------------------------------
@@ -1304,62 +1792,62 @@ class GuestRelationApp(QMainWindow):
         self.offers_status.hide()
         self.office_viewer.save_file()
         if self.office_viewer.current_filepath:
-            self.add_log("1. OFFERS", f"Document saved: {os.path.basename(self.office_viewer.current_filepath)}", "INFO")
+            self.add_log("OFFERS", f"Document saved: {os.path.basename(self.office_viewer.current_filepath)}", "INFO")
 
     def handle_doc_close(self):
         self.offers_status.hide()
         if self.office_viewer.current_filepath:
-            self.add_log("1. OFFERS", f"Document closed: {os.path.basename(self.office_viewer.current_filepath)}", "INFO")
+            self.add_log("OFFERS", f"Document closed: {os.path.basename(self.office_viewer.current_filepath)}", "INFO")
         self.office_viewer.close_file()
 
     def run_offers_creation(self):
         self.offers_status.hide()
         self.is_update_mode = False
-        self.add_log("1. OFFERS", "Action: Create Offerlist triggered", "INFO")
+        self.add_log("OFFERS", "Action: Create Offerlist triggered", "INFO")
         
         if get_todays_offer_list() is not None:
-            self.add_log("1. OFFERS", "Today's offer list already exists. Operation denied. Use UPDATE Offerlist.", "WARNING")
+            self.add_log("OFFERS", "Today's offer list already exists. Operation denied. Use UPDATE Offerlist.", "WARNING")
             return
 
-        self.add_log("1. OFFERS", "Processing Data... Please wait.", "INFO")
+        self.add_log("OFFERS", "Processing Data... Please wait.", "INFO")
         self.office_viewer.close_file()
         self.repaint() 
         
         pipeline_status, msg, final_path = execute_offers_pipeline()
         
         if not pipeline_status and msg == "MISSING_CSVS":
-            self.add_log("1. OFFERS", "Missing CSVs in ARRIVALS. Prompting file selector...", "WARNING")
+            self.add_log("OFFERS", "Missing CSVs in ARRIVALS. Prompting file selector...", "WARNING")
             files, _ = QFileDialog.getOpenFileNames(self, "Select 2 CSV Files (Hold Ctrl for multiple)", ARRIVALS_FOLDER, "CSV (*.csv)")
             if len(files) == 1:
                 second_file, _ = QFileDialog.getOpenFileName(self, "Select the SECOND CSV File", ARRIVALS_FOLDER, "CSV (*.csv)")
                 if second_file:
                     files.append(second_file)
             if len(files) == 2:
-                self.add_log("1. OFFERS", f"User selected CSV files: {os.path.basename(files[0])}, {os.path.basename(files[1])}", "INFO")
+                self.add_log("OFFERS", f"User selected CSV files: {os.path.basename(files[0])}, {os.path.basename(files[1])}", "INFO")
                 pipeline_status, msg, final_path = execute_offers_pipeline(selected_csvs=files)
             else:
-                self.add_log("1. OFFERS", "Requirement: Exactly 2 CSV files. Operation aborted.", "ERROR")
+                self.add_log("OFFERS", "Requirement: Exactly 2 CSV files. Operation aborted.", "ERROR")
                 return
                 
         level = "SUCCESS" if pipeline_status else "ERROR"
-        self.add_log("1. OFFERS", msg, level)
+        self.add_log("OFFERS", msg, level)
         if pipeline_status and final_path:
-            self.add_log("1. OFFERS", f"Opening generated document in OfficeViewer: {os.path.basename(final_path)}", "INFO")
+            self.add_log("OFFERS", f"Opening generated document in OfficeViewer: {os.path.basename(final_path)}", "INFO")
             self.office_viewer.open_file(final_path)
 
     def run_offers_update(self):
         self.offers_status.hide()
         self.is_update_mode = True
-        self.add_log("1. OFFERS", "Action: UPDATE Offerlist triggered", "INFO")
-        self.add_log("1. OFFERS", "Searching for today's file...", "INFO")
+        self.add_log("OFFERS", "Action: UPDATE Offerlist triggered", "INFO")
+        self.add_log("OFFERS", "Searching for today's file...", "INFO")
         self.repaint()
         
         file_path = get_todays_offer_list()
         if file_path:
-            self.add_log("1. OFFERS", f"File located. Mode: UPDATE. Target: {os.path.basename(file_path)}", "SUCCESS")
+            self.add_log("OFFERS", f"File located. Mode: UPDATE. Target: {os.path.basename(file_path)}", "SUCCESS")
             self.office_viewer.open_file(file_path)
         else:
-            self.add_log("1. OFFERS", "No offer list found for today. Please create one first.", "WARNING")
+            self.add_log("OFFERS", "No offer list found for today. Please create one first.", "WARNING")
 
     def handle_save_and_close(self, filepath):
         """
@@ -1369,15 +1857,15 @@ class GuestRelationApp(QMainWindow):
         """
         self.offers_status.hide()
         if self.is_update_mode:
-            self.add_log("1. OFFERS", f"Saving updated offerlist: {os.path.basename(filepath)}", "INFO")
+            self.add_log("OFFERS", f"Saving updated offerlist: {os.path.basename(filepath)}", "INFO")
             try:
                 new_path = duplicate_for_update(filepath)
-                self.add_log("1. OFFERS", f"Offerlist updated & saved successfully: {os.path.basename(new_path)}", "SUCCESS")
+                self.add_log("OFFERS", f"Offerlist updated & saved successfully: {os.path.basename(new_path)}", "SUCCESS")
                 QMessageBox.information(self, "Saved", f"Offerlist updated & saved successfully:\n{os.path.basename(new_path)}")
             except Exception as e:
-                self.add_log("1. OFFERS", f"Update save error: {e}", "ERROR")
+                self.add_log("OFFERS", f"Update save error: {e}", "ERROR")
         else:
-            self.add_log("1. OFFERS", f"Offerlist saved successfully: {os.path.basename(filepath)}", "SUCCESS")
+            self.add_log("OFFERS", f"Offerlist saved successfully: {os.path.basename(filepath)}", "SUCCESS")
             QMessageBox.information(self, "Saved", f"Offerlist saved successfully:\n{os.path.basename(filepath)}")
 
     # -------------------------------------------------------------------------
@@ -1387,7 +1875,7 @@ class GuestRelationApp(QMainWindow):
         """Opens base Cake Memo template from TEMPLATES/ inside OfficeViewer."""
         template_path = resolve_template_path("cake_memo")
         if not template_path or not os.path.exists(template_path):
-            self.add_log("3. CAKE MEMOS", "Cake Memo template not found in TEMPLATES/", "ERROR")
+            self.add_log("CAKE MEMOS", "Cake Memo template not found in TEMPLATES/", "ERROR")
             QMessageBox.warning(self, "Template Error", "Cake Memo template not found in TEMPLATES/CAKE MEMO TEMPLATE/.")
             return
 
@@ -1400,17 +1888,17 @@ class GuestRelationApp(QMainWindow):
             print(f"[CakeMemo] Error copying template: {e}")
             working_file = template_path
 
-        self.add_log("3. CAKE MEMOS", f"Opening Cake Memo template in OfficeViewer: {os.path.basename(working_file)}", "INFO")
+        self.add_log("CAKE MEMOS", f"Opening Cake Memo template in OfficeViewer: {os.path.basename(working_file)}", "INFO")
         self.cake_office_viewer.open_file(working_file)
 
     def handle_cake_save(self):
         self.cake_office_viewer.save_file()
         if self.cake_office_viewer.current_filepath:
-            self.add_log("3. CAKE MEMOS", f"Cake memo working document saved: {os.path.basename(self.cake_office_viewer.current_filepath)}", "INFO")
+            self.add_log("CAKE MEMOS", f"Cake memo working document saved: {os.path.basename(self.cake_office_viewer.current_filepath)}", "INFO")
 
     def handle_cake_close(self):
         if self.cake_office_viewer.current_filepath:
-            self.add_log("3. CAKE MEMOS", f"Cake memo document closed: {os.path.basename(self.cake_office_viewer.current_filepath)}", "INFO")
+            self.add_log("CAKE MEMOS", f"Cake memo document closed: {os.path.basename(self.cake_office_viewer.current_filepath)}", "INFO")
         self.cake_office_viewer.close_file()
 
     def handle_cake_save_and_close(self, filepath):
@@ -1424,7 +1912,7 @@ class GuestRelationApp(QMainWindow):
         6. Generate Automated Outlook Draft.
         """
         try:
-            self.add_log("3. CAKE MEMOS", "Parsing Cake Memo table content...", "INFO")
+            self.add_log("CAKE MEMOS", "Parsing Cake Memo table content...", "INFO")
             memo_data = parse_cake_memo_docx(filepath)
 
             room_num = memo_data["room_number"]
@@ -1443,13 +1931,13 @@ class GuestRelationApp(QMainWindow):
                     counter += 1
 
             shutil.copy2(filepath, dest_path)
-            self.add_log("3. CAKE MEMOS", f"Cake memo saved to: {os.path.basename(dest_path)}", "SUCCESS")
+            self.add_log("CAKE MEMOS", f"Cake memo saved to: {os.path.basename(dest_path)}", "SUCCESS")
 
             # Outlook Draft Generation
-            self.add_log("3. CAKE MEMOS", "Generating automated Outlook draft...", "INFO")
+            self.add_log("CAKE MEMOS", "Generating automated Outlook draft...", "INFO")
             try:
                 create_cake_memo_outlook_draft(dest_path, memo_data)
-                self.add_log("3. CAKE MEMOS", f"Outlook draft created and displayed for Room {room_num}.", "SUCCESS")
+                self.add_log("CAKE MEMOS", f"Outlook draft created and displayed for Room {room_num}.", "SUCCESS")
                 QMessageBox.information(
                     self,
                     "Cake Memo Processed",
@@ -1462,7 +1950,7 @@ class GuestRelationApp(QMainWindow):
                     f"Outlook email draft has been generated and displayed."
                 )
             except Exception as mail_err:
-                self.add_log("3. CAKE MEMOS", f"Outlook draft generation failed: {mail_err}", "WARNING")
+                self.add_log("CAKE MEMOS", f"Outlook draft generation failed: {mail_err}", "WARNING")
                 QMessageBox.warning(
                     self,
                     "Cake Memo Saved (Email Warning)",
@@ -1471,7 +1959,7 @@ class GuestRelationApp(QMainWindow):
                 )
 
         except Exception as e:
-            self.add_log("3. CAKE MEMOS", f"Error in Cake Memo pipeline: {e}", "ERROR")
+            self.add_log("CAKE MEMOS", f"Error in Cake Memo pipeline: {e}", "ERROR")
             QMessageBox.critical(self, "Pipeline Error", f"Failed to process Cake Memo:\n{str(e)}")
 
 
@@ -1480,9 +1968,8 @@ class GuestRelationApp(QMainWindow):
 # =============================================================================
 
 if __name__ == "__main__":
+    ensure_workspace_directories()
     app = QApplication(sys.argv)
-    if not run_gatekeeper_if_needed():
-        sys.exit(0)
     window = GuestRelationApp()
     window.show()
     sys.exit(app.exec())
