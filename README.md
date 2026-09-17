@@ -79,33 +79,61 @@ python app.py
 
 Execute the comprehensive automated test suite:
 ```bash
-py -m unittest test_data_manager.py test_booking_calls.py
+py -m unittest discover -s TESTS -p "test_*.py"
+```
+or run individual suites:
+```bash
+py -m unittest TESTS/test_data_manager.py TESTS/test_booking_calls.py TESTS/test_enhancements.py
 ```
 
 ## Directory Structure
 
 ```
-├── app.py                      # Main PyQt6 desktop application & navigation
-├── booking_calls.py            # Booking.com calls CRM module & scheduling logic
-├── data_manager.py             # Data ingestion, master state, Gatekeeper & comparison engine
-├── offers_module.py            # Arrivals pipeline, CSV parsing & Word generation engine
-├── test_booking_calls.py       # Unit tests for booking calls module
-├── test_data_manager.py        # Unit tests for data management & directory architecture
+├── app.py                      # Main PyQt6 desktop application shell & navigation
+├── MODULES/                    # Core business logic, data models & engine services
+│   ├── __init__.py             # Module registry & sys.path setup
+│   ├── data_manager.py         # Ingestion, master state, Gatekeeper & comparison engine
+│   ├── booking_calls.py        # Booking.com calls CRM module & scheduling logic
+│   ├── offers_module.py        # Arrivals pipeline, CSV parsing & Word generation engine
+│   └── plot_viewer.py          # Interactive resort plot map & block visualizer
+├── OPTIONS/                    # Menu option widgets & shared UI components
+│   ├── __init__.py             # Option registry & dictionary-based dispatch
+│   ├── _shared_widgets.py      # Sidebar, OfficeViewer, TaskWidget
+│   ├── configuration_option.py # Configuration and system setup
+│   ├── stats_option.py         # Resort analytics & statistics
+│   ├── moves_option.py         # Room moves inspection
+│   ├── todo_option.py          # Task list management
+│   ├── offers_option.py        # Offers processing interface
+│   ├── allergies_option.py     # Allergies view placeholder
+│   ├── cake_memo_option.py     # Cake memo generation interface
+│   ├── booking_calls_option.py # Booking calls CRM interface
+│   ├── system_data_option.py   # Database state inspection
+│   └── logs_option.py          # Centralized audit logging view
+├── TESTS/                      # Automated test suites
+│   ├── __init__.py
+│   ├── test_booking_calls.py   # Unit tests for booking calls module
+│   ├── test_data_manager.py    # Unit tests for data management & directory architecture
+│   └── test_enhancements.py    # Suite testing plot viewer & configuration
 ├── requirements.txt            # Python package dependencies
 ├── .gitignore                  # Git ignore rules (excludes sensitive JSONs & CSVs)
 ├── DATABASE/                   # Centralized local data store
-│   ├── booking calls for today/# Today's scheduled calls (JSON)
-│   ├── SANDY BEACH/            # Arrivals cache
-│   ├── SANDY VILLAS/           # Arrivals cache
-│   └── .gitkeep
-├── BOOKING CALLS/              # Local booking calls work directory
-│   └── .gitkeep
+│   ├── BOOKING CALLS FOR TODAY/# Today's scheduled calls (JSON)
+│   ├── CHECK OUT HISTORY/      # Historical check-out records
+│   ├── HOTEL STATE/            # master_state.json and state_metadata.json
+│   ├── ROOM MOVES/             # Historical room move records
+│   ├── SANDY BEACH/            # Sandy Beach arrivals and departures cache
+│   └── SANDY VILLAS/           # Sandy Villas arrivals and departures cache
+├── BOOKING CALLS/              # Local booking calls work directory (BOOKING CALLS.xlsx)
 ├── TEMPLATES/                  # Blank office document templates
 │   ├── BOOKING CALLS TEMPLATE/ # Blank BOOKING CALLS.xlsx template
 │   ├── CAKE MEMO TEMPLATE/     # Blank CAKE MEMO.docx template
+│   ├── CHECK MEMO TEMPLATE/    # Blank CHECK MEMO.docx template
 │   └── OFFER LIST TEMPLATE/    # Blank OFFER LIST TEMPLATE.docx template
 ├── OUTPUT/                     # Pipeline output folders
+│   ├── CAKE_MEMOS/
 │   ├── OFFERS/
 │   └── TODAYS_LIST/
+├── PLOT/                       # Resort map block data & coordinates
+├── DATA_BACKUP/                # Backup archive
 └── TRASH/                      # Processed and discarded CSV archive
 ```

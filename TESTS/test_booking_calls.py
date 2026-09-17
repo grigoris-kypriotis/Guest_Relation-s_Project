@@ -11,8 +11,15 @@ import unittest
 from datetime import date, timedelta
 
 import openpyxl
+import sys
+from pathlib import Path
 
-from booking_calls import (
+# Ensure project root is in sys.path
+PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from MODULES.booking_calls import (
     calculate_call_schedule,
     BookingCallsManager,
     CALL_STATUSES
@@ -139,7 +146,7 @@ class TestBookingCallsManager(unittest.TestCase):
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_is_booking_com_filtering(self):
-        from booking_calls import is_booking_com
+        from MODULES.booking_calls import is_booking_com
         # Matches Booking.com in various fields
         self.assertTrue(is_booking_com({"Χρεώστης": "BOOKING.COM"}))
         self.assertTrue(is_booking_com({"Χρεώστης": "Booking.com B.V."}))

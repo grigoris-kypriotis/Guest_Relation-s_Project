@@ -13,9 +13,15 @@
         "F SUP": 7
       },
       "floors": {
-        "Ground Floor": ["1101-1109"],
-        "1st Floor": ["1111-1119"],
-        "2nd Floor": ["1121-1129"]
+        "Ground Floor": [
+          "1101-1109"
+        ],
+        "1st Floor": [
+          "1111-1119"
+        ],
+        "2nd Floor": [
+          "1121-1129"
+        ]
       },
       "features": "All rooms feature showers. Bed types vary (DBL/2M, 3M, 4M, SOFA)."
     }
@@ -33,8 +39,12 @@
         "F2": 8
       },
       "floors": {
-        "Ground Floor": ["1201-1208"],
-        "1st Floor": ["1211-1218"]
+        "Ground Floor": [
+          "1201-1208"
+        ],
+        "1st Floor": [
+          "1211-1218"
+        ]
       },
       "features": "Mix of Bath and Shower options with DBL/2HM/2M bed configurations."
     }
@@ -55,9 +65,17 @@
         "DBL CLASSIC": 2
       },
       "floors": {
-        "Ground Floor": ["1301-1310", "1321-1324"],
-        "1st Floor": ["1311-1314", "1325-1334"],
-        "2nd Floor": ["1341-1354"]
+        "Ground Floor": [
+          "1301-1310",
+          "1321-1324"
+        ],
+        "1st Floor": [
+          "1311-1314",
+          "1325-1334"
+        ],
+        "2nd Floor": [
+          "1341-1354"
+        ]
       }
     }
   },
@@ -74,9 +92,15 @@
         "F2": 6
       },
       "floors": {
-        "Ground Floor": ["1401-1408"],
-        "1st Floor": ["1411-1418"],
-        "2nd Floor": ["1421-1422"]
+        "Ground Floor": [
+          "1401-1408"
+        ],
+        "1st Floor": [
+          "1411-1418"
+        ],
+        "2nd Floor": [
+          "1421-1422"
+        ]
       }
     }
   },
@@ -93,8 +117,12 @@
         "F2": 4
       },
       "floors": {
-        "Ground Floor": ["1501-1507"],
-        "1st Floor": ["1511-1517"]
+        "Ground Floor": [
+          "1501-1507"
+        ],
+        "1st Floor": [
+          "1511-1517"
+        ]
       }
     }
   },
@@ -111,8 +139,12 @@
         "F2": 4
       },
       "floors": {
-        "Ground Floor": ["1601-1606"],
-        "1st Floor": ["1611-1616"]
+        "Ground Floor": [
+          "1601-1606"
+        ],
+        "1st Floor": [
+          "1611-1616"
+        ]
       }
     }
   },
@@ -129,9 +161,15 @@
         "F2": 6
       },
       "floors": {
-        "Ground Floor": ["1701-1708"],
-        "1st Floor": ["1711-1718"],
-        "2nd Floor": ["1721-1722"]
+        "Ground Floor": [
+          "1701-1708"
+        ],
+        "1st Floor": [
+          "1711-1718"
+        ],
+        "2nd Floor": [
+          "1721-1722"
+        ]
       }
     }
   },
@@ -149,9 +187,15 @@
         "FSG": 5
       },
       "floors": {
-        "Ground Floor": ["1802-1807"],
-        "1st Floor": ["1812-1817"],
-        "2nd Floor": ["1821-1827"]
+        "Ground Floor": [
+          "1802-1807"
+        ],
+        "1st Floor": [
+          "1812-1817"
+        ],
+        "2nd Floor": [
+          "1821-1827"
+        ]
       }
     }
   },
@@ -167,8 +211,12 @@
         "F1": 4
       },
       "floors": {
-        "Ground Floor": ["1901-1902"],
-        "1st Floor": ["1911-1912"]
+        "Ground Floor": [
+          "1901-1902"
+        ],
+        "1st Floor": [
+          "1911-1912"
+        ]
       }
     }
   },
@@ -183,9 +231,18 @@
       "views": "Side Sea View, Garden View, Stream View, Front View, Back Side",
       "features": "Triple Twin Room, Double Room Plus Single Bed, Double Room New Set, Triple Room With Bath, Disabled Friendly",
       "floors": {
-        "Ground Floor": ["2001-2016", "2101-2114"],
-        "1st Floor": ["2201-2216", "2301-2314"],
-        "2nd Floor": ["2401-2416", "2501-2514"]
+        "Ground Floor": [
+          "2001-2016",
+          "2101-2114"
+        ],
+        "1st Floor": [
+          "2201-2216",
+          "2301-2314"
+        ],
+        "2nd Floor": [
+          "2401-2416",
+          "2501-2514"
+        ]
       }
     }
   },
@@ -200,7 +257,9 @@
       "views": "Side Sea View, Garden View, Blind Sea View, Problematic View, Roof View",
       "features": "Fam Room, Triple Twin Room",
       "floors": {
-        "Level": ["3103-3135"]
+        "Level": [
+          "3103-3135"
+        ]
       }
     }
   },
@@ -215,12 +274,38 @@
       "views": "Side Sea View, Garden View, Pool View, PV SSV, Back View",
       "features": "Triple Twin Room, Double Room Plus Single Bed, Twin Room",
       "twin_beds": [
-        "4201", "4202", "4203", "4204", "4207", "4208", "4211", "4212", "4215", "4216",
-        "4301", "4302", "4303", "4304", "4307", "4308", "4311", "4312", "4315", "4316"
+        "4201",
+        "4202",
+        "4203",
+        "4204",
+        "4207",
+        "4208",
+        "4211",
+        "4212",
+        "4215",
+        "4216",
+        "4301",
+        "4302",
+        "4303",
+        "4304",
+        "4307",
+        "4308",
+        "4311",
+        "4312",
+        "4315",
+        "4316"
       ],
       "floors": {
-        "Ground Floor": ["4001-4016", "4201-4216", "4401-4416"],
-        "1st Floor": ["4101-4116", "4301-4316", "4501-4516"]
+        "Ground Floor": [
+          "4001-4016",
+          "4201-4216",
+          "4401-4416"
+        ],
+        "1st Floor": [
+          "4101-4116",
+          "4301-4316",
+          "4501-4516"
+        ]
       }
     }
   },
@@ -235,8 +320,16 @@
       "views": "Garden View, Side Sea View",
       "features": "Double Room Plus Single Bed, Shower",
       "floors": {
-        "Ground Floor": ["5001-5020", "5201-5218", "5401-5420"],
-        "1st Floor": ["5101-5120", "5301-5318", "5501-5520"]
+        "Ground Floor": [
+          "5001-5020",
+          "5201-5218",
+          "5401-5420"
+        ],
+        "1st Floor": [
+          "5101-5120",
+          "5301-5318",
+          "5501-5520"
+        ]
       }
     }
   },
@@ -251,9 +344,15 @@
       "views": "Back View, Garden View, Side Sea View",
       "features": "Double + Single, Shower",
       "floors": {
-        "Ground Floor": ["6001-6026"],
-        "1st Floor": ["6101-6126"],
-        "2nd Floor": ["6201-6226"]
+        "Ground Floor": [
+          "6001-6026"
+        ],
+        "1st Floor": [
+          "6101-6126"
+        ],
+        "2nd Floor": [
+          "6201-6226"
+        ]
       }
     }
   },
@@ -272,8 +371,12 @@
       },
       "views": "Side Sea View, Hide Sea View, Pool View, Back View",
       "floors": {
-        "Ground Floor": ["7001-7041"],
-        "1st Floor": ["7101-7141"]
+        "Ground Floor": [
+          "7001-7041"
+        ],
+        "1st Floor": [
+          "7101-7141"
+        ]
       }
     }
   },
@@ -293,9 +396,15 @@
       "views": "Sea View, Garden View, Side Sea View",
       "features": "Owner Hidden Room",
       "floors": {
-        "Ground Floor": ["8001-8011"],
-        "1st Floor": ["8101-8119"],
-        "2nd Floor": ["8200-8211"]
+        "Ground Floor": [
+          "8001-8011"
+        ],
+        "1st Floor": [
+          "8101-8119"
+        ],
+        "2nd Floor": [
+          "8200-8211"
+        ]
       }
     }
   },
@@ -316,38 +425,146 @@
       },
       "sandy_beach_resort": {
         "low_mid_season": {
-          "Classic Rooms GV": {"Classic Rooms SSV": 30, "Superior GV": 45, "Family F1G": 50, "Family F2G": 55, "FAMILY SUP.": 65, "Junior Suite GV": 70, "Junior Suite SV": 80},
-          "Classic Rooms SSV": {"Superior GV": 40, "Family F1G": 45, "Family F2G": 50, "FAMILY SUP.": 60, "Junior Suite GV": 65, "Junior Suite SV": 75},
-          "Superior Rooms GV": {"Family F1G": 40, "Family F2G": 45, "FAMILY SUP.": 55, "Junior Suite GV": 50, "Junior Suite SV": 55},
-          "Family Rooms 1bedroom": {"Family F2G": 40, "FAMILY SUP.": 50, "Junior Suite GV": 45, "Junior Suite SV": 50},
-          "Family 2 bedroom": {"FAMILY SUP.": 45, "Junior Suite GV": 40, "Junior Suite SV": 45},
-          "Superior Family Rooms": {"Junior Suite GV": 35, "Junior Suite SV": 40},
-          "Junior Suite GV": {"Junior Suite SV": 35}
+          "Classic Rooms GV": {
+            "Classic Rooms SSV": 30,
+            "Superior GV": 45,
+            "Family F1G": 50,
+            "Family F2G": 55,
+            "FAMILY SUP.": 65,
+            "Junior Suite GV": 70,
+            "Junior Suite SV": 80
+          },
+          "Classic Rooms SSV": {
+            "Superior GV": 40,
+            "Family F1G": 45,
+            "Family F2G": 50,
+            "FAMILY SUP.": 60,
+            "Junior Suite GV": 65,
+            "Junior Suite SV": 75
+          },
+          "Superior Rooms GV": {
+            "Family F1G": 40,
+            "Family F2G": 45,
+            "FAMILY SUP.": 55,
+            "Junior Suite GV": 50,
+            "Junior Suite SV": 55
+          },
+          "Family Rooms 1bedroom": {
+            "Family F2G": 40,
+            "FAMILY SUP.": 50,
+            "Junior Suite GV": 45,
+            "Junior Suite SV": 50
+          },
+          "Family 2 bedroom": {
+            "FAMILY SUP.": 45,
+            "Junior Suite GV": 40,
+            "Junior Suite SV": 45
+          },
+          "Superior Family Rooms": {
+            "Junior Suite GV": 35,
+            "Junior Suite SV": 40
+          },
+          "Junior Suite GV": {
+            "Junior Suite SV": 35
+          }
         },
         "high_season": {
-          "Classic Rooms GV": {"Classic Rooms SSV": 40, "Superior GV": 55, "Family F1G": 60, "Family F2G": 65, "FAMILY SUP.": 75, "Junior Suite GV": 80, "Junior Suite SV": 85},
-          "Classic Rooms SSV": {"Superior GV": 50, "Family F1G": 55, "Family F2G": 60, "FAMILY SUP.": 70, "Junior Suite GV": 75, "Junior Suite SV": 80},
-          "Superior Rooms GV": {"Family F1G": 50, "Family F2G": 55, "FAMILY SUP.": 65, "Junior Suite GV": 70, "Junior Suite SV": 75},
-          "Family Rooms 1bedroom": {"Family F2G": 50, "FAMILY SUP.": 60, "Junior Suite GV": 65, "Junior Suite SV": 70},
-          "Family 2 bedroom": {"FAMILY SUP.": 55, "Junior Suite GV": 60, "Junior Suite SV": 65},
-          "Superior Family Rooms": {"Junior Suite GV": 50, "Junior Suite SV": 60},
-          "Junior Suite GV": {"Junior Suite SV": 55}
+          "Classic Rooms GV": {
+            "Classic Rooms SSV": 40,
+            "Superior GV": 55,
+            "Family F1G": 60,
+            "Family F2G": 65,
+            "FAMILY SUP.": 75,
+            "Junior Suite GV": 80,
+            "Junior Suite SV": 85
+          },
+          "Classic Rooms SSV": {
+            "Superior GV": 50,
+            "Family F1G": 55,
+            "Family F2G": 60,
+            "FAMILY SUP.": 70,
+            "Junior Suite GV": 75,
+            "Junior Suite SV": 80
+          },
+          "Superior Rooms GV": {
+            "Family F1G": 50,
+            "Family F2G": 55,
+            "FAMILY SUP.": 65,
+            "Junior Suite GV": 70,
+            "Junior Suite SV": 75
+          },
+          "Family Rooms 1bedroom": {
+            "Family F2G": 50,
+            "FAMILY SUP.": 60,
+            "Junior Suite GV": 65,
+            "Junior Suite SV": 70
+          },
+          "Family 2 bedroom": {
+            "FAMILY SUP.": 55,
+            "Junior Suite GV": 60,
+            "Junior Suite SV": 65
+          },
+          "Superior Family Rooms": {
+            "Junior Suite GV": 50,
+            "Junior Suite SV": 60
+          },
+          "Junior Suite GV": {
+            "Junior Suite SV": 55
+          }
         }
       },
       "sandy_villas_pool_suites": {
         "low_mid_season": {
-          "Superior room pool view": {"Superior SUP": 60, "Junior Suite PV": 70, "Junior Suite SUP": 80, "Junior Suite SP": 180, "Grand Suite PP": 300},
-          "Superior room swim up": {"Junior Suite SUP": 60, "Junior Suite SP": 150, "Grand Suite PP": 250},
-          "Junior Suite Pool View": {"Junior Suite SUP": 70, "Junior Suite SP": 100, "Grand Suite PP": 200},
-          "Junior Suite swim up": {"Junior Suite SP": 80, "Grand Suite PP": 180},
-          "Junior Suite Semi Private Pool": {"Grand Suite PP": 150}
+          "Superior room pool view": {
+            "Superior SUP": 60,
+            "Junior Suite PV": 70,
+            "Junior Suite SUP": 80,
+            "Junior Suite SP": 180,
+            "Grand Suite PP": 300
+          },
+          "Superior room swim up": {
+            "Junior Suite SUP": 60,
+            "Junior Suite SP": 150,
+            "Grand Suite PP": 250
+          },
+          "Junior Suite Pool View": {
+            "Junior Suite SUP": 70,
+            "Junior Suite SP": 100,
+            "Grand Suite PP": 200
+          },
+          "Junior Suite swim up": {
+            "Junior Suite SP": 80,
+            "Grand Suite PP": 180
+          },
+          "Junior Suite Semi Private Pool": {
+            "Grand Suite PP": 150
+          }
         },
         "high_season": {
-          "Superior room pool view": {"Superior SUP": 80, "Junior Suite PV": 90, "Junior Suite SUP": 100, "Junior Suite SP": 200, "Grand Suite PP": 350},
-          "Superior room swim up": {"Junior Suite SUP": 80, "Junior Suite SP": 170, "Grand Suite PP": 300},
-          "Junior Suite Pool View": {"Junior Suite SUP": 90, "Junior Suite SP": 120, "Grand Suite PP": 250},
-          "Junior Suite swim up": {"Junior Suite SP": 100, "Grand Suite PP": 200},
-          "Junior Suite Semi Private Pool": {"Grand Suite PP": 180}
+          "Superior room pool view": {
+            "Superior SUP": 80,
+            "Junior Suite PV": 90,
+            "Junior Suite SUP": 100,
+            "Junior Suite SP": 200,
+            "Grand Suite PP": 350
+          },
+          "Superior room swim up": {
+            "Junior Suite SUP": 80,
+            "Junior Suite SP": 170,
+            "Grand Suite PP": 300
+          },
+          "Junior Suite Pool View": {
+            "Junior Suite SUP": 90,
+            "Junior Suite SP": 120,
+            "Grand Suite PP": 250
+          },
+          "Junior Suite swim up": {
+            "Junior Suite SP": 100,
+            "Grand Suite PP": 200
+          },
+          "Junior Suite Semi Private Pool": {
+            "Grand Suite PP": 180
+          }
         }
       }
     }

@@ -26,12 +26,15 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
 DATABASE_DIR = os.path.join(BASE_DIR, "DATABASE")
 TEMPLATES_DIR = os.path.join(BASE_DIR, "TEMPLATES")
 OUTPUT_DIR = os.path.join(BASE_DIR, "OUTPUT")
 TRASH_DIR = os.path.join(BASE_DIR, "TRASH")
-TODAYS_LIST_DIR = os.path.join(OUTPUT_DIR, "todays_list")
+TODAYS_LIST_DIR = os.path.join(OUTPUT_DIR, "TODAYS_LIST")
 BOOKING_CALLS_DIR = os.path.join(BASE_DIR, "BOOKING CALLS")
 PLOT_DIR = os.path.join(BASE_DIR, "PLOT")
 HOTEL_DATASET_PATH = os.path.join(PLOT_DIR, "HotelDataSet.json")
@@ -1096,13 +1099,18 @@ class InHouseDataManager:
     # -------------------------------------------------------------------------
     # Database Purge & Room Block JSON Exporter
     # -------------------------------------------------------------------------
-    def purge_hotel_database(self) -> bool:
+    def purge_hotel_database(self) -> Dict[str, Any]:
         """
         Purges transient room and guest records from DATABASE/HOTEL STATE/,
-        resetting current occupancy states while keeping templates and system configuration intact.
+        checkouts, room moves, booking calls, and all auxiliary system JSON files,
+        stripping dynamic runtime fields from HotelDataSet.json and resetting
+        room block JSON exports.
         """
+        purged_count = 0
+
         # 1. Reset master_state.json
         save_and_archive_json({}, self.master_state_path)
+        purged_count += 1
 
         # 2. Reset state_metadata.json
         reset_meta = {
@@ -1112,14 +1120,87 @@ class InHouseDataManager:
             "last_processed_date": None
         }
         self.save_metadata(reset_meta)
+        purged_count += 1
 
-        # 3. Synchronize / reset PLOT block files
+        # 3. Reset checkouts history
+        try:
+            save_and_archive_json({"records": []}, self.checkouts_path)
+            purged_count += 1
+        except Exception:
+            pass
+
+        # 4. Reset room moves history
+        try:
+            save_and_archive_json([], self.room_moves_path)
+            purged_count += 1
+        except Exception:
+            pass
+
+        # 5. Reset today's booking calls and arrivals
+        try:
+            if os.path.exists(BOOKING_CALLS_TODAY_JSON):
+                save_and_archive_json([], BOOKING_CALLS_TODAY_JSON)
+                purged_count += 1
+        except Exception:
+            pass
+
+        try:
+            if os.path.exists(self.arrivals_state_path):
+                save_and_archive_json({}, self.arrivals_state_path)
+                purged_count += 1
+        except Exception:
+            pass
+
+        # 6. Target auxiliary JSON files across workspace
+        aux_target_files = [
+            "guest_manifest.json",
+            "cake_memos.json",
+            "offer_list.json",
+            "reservations.json",
+            "allocations.json",
+            "stats_cache.json",
+            "memos.json",
+            "offers.json"
+        ]
+        search_dirs = [BASE_DIR, DATABASE_DIR, OUTPUT_DIR]
+        for s_dir in search_dirs:
+            if not os.path.exists(s_dir):
+                continue
+            for fname in aux_target_files:
+                fpath = os.path.join(s_dir, fname)
+                if os.path.exists(fpath):
+                    try:
+                        with open(fpath, "w", encoding="utf-8") as f:
+                            json.dump([], f, indent=2)
+                        purged_count += 1
+                    except Exception:
+                        pass
+
+        # 7. Flush dynamic runtime fields in HotelDataSet.json (occupancies and assignments)
+        hotel_ds_path = Path(HOTEL_DATASET_PATH)
+        if hotel_ds_path.exists():
+            try:
+                with open(hotel_ds_path, "r", encoding="utf-8") as f:
+                    records = json.load(f)
+                if isinstance(records, list):
+                    for node in records:
+                        if isinstance(node, dict):
+                            node.pop("current_occupancy", None)
+                            node.pop("assigned_guests", None)
+                            node.pop("live_status", None)
+                    with open(hotel_ds_path, "w", encoding="utf-8") as f:
+                        json.dump(records, f, indent=2, ensure_ascii=False)
+                    purged_count += 1
+            except Exception as err:
+                print(f"[purge_hotel_database] Warning resetting HotelDataSet.json: {err}")
+
+        # 8. Synchronize / reset PLOT block files
         try:
             self.export_room_block_json_data()
         except Exception as e:
             print(f"[InHouseDataManager] Warning resetting block files on purge: {e}")
 
-        return True
+        return {"success": True, "purged_count": purged_count}
 
     def export_room_block_json_data(
         self,
@@ -1228,7 +1309,7 @@ class InHouseDataManager:
         }
 
 
-def purge_hotel_database() -> bool:
+def purge_hotel_database() -> Dict[str, Any]:
     """Convenience top-level wrapper to purge transient hotel database records."""
     return InHouseDataManager().purge_hotel_database()
 

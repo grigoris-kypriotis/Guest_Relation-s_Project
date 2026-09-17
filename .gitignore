@@ -53,6 +53,10 @@ OUTPUT/**
 !OUTPUT/**/
 !OUTPUT/**/.gitkeep
 
+DATA_BACKUP/**
+!DATA_BACKUP/**/
+!DATA_BACKUP/**/.gitkeep
+
 # Whitelist all .gitkeep markers
 !**/.gitkeep
 

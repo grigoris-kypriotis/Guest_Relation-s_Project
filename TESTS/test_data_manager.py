@@ -11,8 +11,15 @@ import shutil
 import tempfile
 import unittest
 from datetime import date
+import sys
+from pathlib import Path
 
-from data_manager import InHouseDataManager
+# Ensure project root is in sys.path
+PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from MODULES.data_manager import InHouseDataManager
 
 
 class TestInHouseDataManager(unittest.TestCase):
@@ -186,7 +193,7 @@ class TestInHouseDataManager(unittest.TestCase):
         self.assertTrue(os.path.exists(dest2))
 
     def test_database_directory_structure_and_designated_subdirectories(self):
-        from data_manager import (
+        from MODULES.data_manager import (
             DATABASE_DIR, HOTEL_STATE_DIR, MASTER_STATE_PATH, STATE_META_PATH,
             CHECKOUT_HISTORY_DIR, CHECKOUTS_JSON,
             ROOM_MOVES_DIR, ROOM_MOVES_JSON,
@@ -278,7 +285,7 @@ class TestInHouseDataManager(unittest.TestCase):
         self.assertEqual(len(parsed["56995"]["Πελάτες"]), 2)
 
     def test_save_and_archive_json(self):
-        from data_manager import (
+        from MODULES.data_manager import (
             save_and_archive_json, DATABASE_DIR,
             CHECKOUT_HISTORY_DIR, ROOM_MOVES_DIR, BOOKING_CALLS_TODAY_DIR, HOTEL_STATE_DIR
         )
@@ -318,7 +325,7 @@ class TestInHouseDataManager(unittest.TestCase):
         self.assertEqual(os.path.basename(os.path.dirname(auto_bc)).upper(), "BOOKING CALLS FOR TODAY")
 
     def test_template_resolution_protocol(self):
-        from data_manager import resolve_template_path, TEMPLATES_DIR
+        from MODULES.data_manager import resolve_template_path, TEMPLATES_DIR
         # 1. Booking calls template
         bc_tpl = resolve_template_path("booking_calls")
         self.assertIsNotNone(bc_tpl)
@@ -338,7 +345,7 @@ class TestInHouseDataManager(unittest.TestCase):
         self.assertTrue("check memo template" in cm_tpl.lower() or "cake memo template" in cm_tpl.lower())
 
     def test_property_abstraction_and_schema_tagging(self):
-        from data_manager import (
+        from MODULES.data_manager import (
             get_property_dir, get_property_arrivals_path, get_property_departures_path,
             CHECKOUTS_JSON
         )

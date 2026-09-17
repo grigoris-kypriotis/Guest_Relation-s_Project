@@ -1,4 +1,5 @@
 import os
+import sys
 import glob
 import csv
 import re
@@ -8,7 +9,9 @@ from datetime import datetime
 import win32com.client
 import pythoncom
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
 def _load_env_file():
     env_path = os.path.join(BASE_DIR, ".env")
@@ -28,15 +31,15 @@ def _load_env_file():
 
 _load_env_file()
 
-from data_manager import resolve_template_path, DATABASE_DIR, OUTPUT_DIR, TODAYS_LIST_DIR
+from MODULES.data_manager import resolve_template_path, DATABASE_DIR, OUTPUT_DIR, TODAYS_LIST_DIR
 
 ARRIVALS_FOLDER = os.path.abspath(DATABASE_DIR)
 FINAL_FOLDER = os.path.abspath(os.path.join(OUTPUT_DIR, "OFFERS"))
 TODAY_LIST_FOLDER = os.path.abspath(TODAYS_LIST_DIR)
 
-TEMPLATE_PATH = resolve_template_path("offer_list") or os.path.abspath(os.path.join(BASE_DIR, "templates", "offer list template", "OFFER LIST TEMPLATE.docx"))
+TEMPLATE_PATH = resolve_template_path("offer_list") or os.path.abspath(os.path.join(BASE_DIR, "TEMPLATES", "OFFER LIST TEMPLATE", "OFFER LIST TEMPLATE.docx"))
 
-CHECK_MEMO_TEMPLATE_PATH = resolve_template_path("check_memo") or os.path.abspath(os.path.join(BASE_DIR, "templates", "check memo template", "CHECK MEMO.docx"))
+CHECK_MEMO_TEMPLATE_PATH = resolve_template_path("check_memo") or os.path.abspath(os.path.join(BASE_DIR, "TEMPLATES", "CHECK MEMO TEMPLATE", "CHECK MEMO.docx"))
 CAKE_TEMPLATE_PATH = CHECK_MEMO_TEMPLATE_PATH
 CAKE_MEMO_TEMPLATE_PATH = CHECK_MEMO_TEMPLATE_PATH
 

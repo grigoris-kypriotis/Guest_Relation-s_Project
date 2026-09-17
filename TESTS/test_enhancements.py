@@ -11,7 +11,11 @@ from pathlib import Path
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 from PyQt6.QtWidgets import QApplication
 
-from data_manager import (
+PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from MODULES.data_manager import (
     InHouseDataManager,
     extract_inhouse_report_date,
     validate_inhouse_file_date,
@@ -22,8 +26,8 @@ from data_manager import (
     MASTER_STATE_PATH,
     STATE_META_PATH
 )
-from plot_viewer import PlotGraphWindow, ResortNodeItem
-from app import ConfigurationWidget, StatsWidget, GuestRelationApp
+from MODULES.plot_viewer import PlotGraphWindow, ResortNodeItem, REAL_MAP_COORDINATES
+from app import ConfigurationWidget, StatsWidget, GuestRelationApp, WorkspaceViewerDialog, ResortStatsDialog
 
 
 class TestEnhancementsSuite(unittest.TestCase):
@@ -200,6 +204,114 @@ class TestEnhancementsSuite(unittest.TestCase):
         self.assertIsNotNone(app_win.config_widget)
         self.assertIsNotNone(app_win.stats_widget)
         app_win.close()
+
+    # -------------------------------------------------------------------------
+    # 7. Real Map Coordinates & Node 44 (Ermis Gyro) Tests
+    # -------------------------------------------------------------------------
+    def test_real_map_coordinates_and_node_44(self):
+        self.assertEqual(len(REAL_MAP_COORDINATES), 44)
+        self.assertIn(44, REAL_MAP_COORDINATES)
+        # Node 44 is Ermis Gyro Greek Restaurant located at (1874, 90) (top-right Sandy Villas)
+        self.assertEqual(REAL_MAP_COORDINATES[44], (1874, 90))
+
+        # Coastal nodes (West) should be positioned on the left (X <= 400)
+        coastal_node_ids = [29, 43, 28, 27, 31, 25, 26]
+        for nid in coastal_node_ids:
+            self.assertIn(nid, REAL_MAP_COORDINATES)
+            x, y = REAL_MAP_COORDINATES[nid]
+            self.assertLessEqual(x, 400, f"Coastal node {nid} should have X <= 400, got {x}")
+
+        # Sandy Villas & Pool Suites (Far East) should be on the right (X >= 1500)
+        villas_node_ids = [33, 34, 35, 36, 37, 38, 39, 40, 44]
+        for vid in villas_node_ids:
+            self.assertIn(vid, REAL_MAP_COORDINATES)
+            x, y = REAL_MAP_COORDINATES[vid]
+            self.assertGreaterEqual(x, 1500, f"Villas node {vid} should have X >= 1500, got {x}")
+
+    # -------------------------------------------------------------------------
+    # 8. Crash-Proof Node Click & Empty Attributes Handling
+    # -------------------------------------------------------------------------
+    def test_plot_viewer_crash_proof_node_click(self):
+        # Test malformed / empty node data
+        empty_node = {"id": 999}
+        item = ResortNodeItem(empty_node, 100, 100)
+        self.assertIsNotNone(item)
+
+        # Ensure no exception when clicking with various status bar callbacks
+        clicked_msgs = []
+        plot_win = PlotGraphWindow()
+        plot_win._on_node_clicked(empty_node)  # Should execute safely without raising
+        self.assertTrue(len(plot_win.lbl_status.text()) > 0)
+        plot_win.close()
+
+    # -------------------------------------------------------------------------
+    # 9. ResortStatsDialog & StatsWidget Scrollable 2-Tab Structure
+    # -------------------------------------------------------------------------
+    def test_resort_stats_dialog_and_stats_widget_tabs(self):
+        # StatsWidget structure
+        stats_w = StatsWidget()
+        self.assertEqual(stats_w.tabs.count(), 2)
+        self.assertEqual(stats_w.tabs.tabText(0), "📈 Visual Analytics Suite")
+        self.assertEqual(stats_w.tabs.tabText(1), "📋 Guest Manifest Table")
+        self.assertIsNotNone(stats_w.analytics_scroll)
+        self.assertIsNotNone(stats_w.card_capacity)
+        self.assertIsNotNone(stats_w.card_occ)
+        self.assertIsNotNone(stats_w.card_facilities)
+        self.assertIsNotNone(stats_w.box_board)
+        self.assertIsNotNone(stats_w.box_nat)
+        self.assertIsNotNone(stats_w.box_rooms)
+
+        # ResortStatsDialog structure
+        stats_dlg = ResortStatsDialog(parent=None)
+        self.assertEqual(stats_dlg.tabs.count(), 2)
+        self.assertIsNotNone(stats_dlg.analytics_scroll)
+        self.assertIsNotNone(stats_dlg.manifest_widget)
+        stats_dlg.close()
+
+    # -------------------------------------------------------------------------
+    # 10. Database Purge Strips Dynamic Fields from HotelDataSet.json
+    # -------------------------------------------------------------------------
+    def test_purge_hotel_database_strips_dynamic_fields(self):
+        # Inject dynamic fields into HotelDataSet.json
+        with open(HOTEL_DATASET_PATH, "r", encoding="utf-8") as f:
+            records = json.load(f)
+
+        records[0]["current_occupancy"] = 99
+        records[0]["assigned_guests"] = ["Test Guest"]
+        records[0]["live_status"] = "BUSY"
+
+        with open(HOTEL_DATASET_PATH, "w", encoding="utf-8") as f:
+            json.dump(records, f, indent=2)
+
+        # Execute purge
+        res = self.dm.purge_hotel_database()
+        self.assertTrue(res.get("success", False))
+        self.assertGreater(res.get("purged_count", 0), 0)
+
+        # Verify dynamic fields were stripped
+        with open(HOTEL_DATASET_PATH, "r", encoding="utf-8") as f:
+            updated_records = json.load(f)
+
+        self.assertNotIn("current_occupancy", updated_records[0])
+        self.assertNotIn("assigned_guests", updated_records[0])
+        self.assertNotIn("live_status", updated_records[0])
+        self.assertIn("name", updated_records[0])  # Physical structure retained
+
+    # -------------------------------------------------------------------------
+    # 11. WorkspaceViewerDialog 99% Bounds & Outer Padding Tests
+    # -------------------------------------------------------------------------
+    def test_workspace_viewer_dialog_geometry(self):
+        parent_widget = ConfigurationWidget()
+        parent_widget.resize(1000, 800)
+        viewer_dlg = WorkspaceViewerDialog("Offerlist Viewer", "<p>Content</p>", parent=parent_widget)
+        viewer_dlg.show()
+        # Verify 99% scale calculation
+        expected_w = int(1000 * 0.99)
+        expected_h = int(800 * 0.99)
+        self.assertEqual(viewer_dlg.width(), expected_w)
+        self.assertEqual(viewer_dlg.height(), expected_h)
+        viewer_dlg.close()
+        parent_widget.close()
 
 
 if __name__ == "__main__":

@@ -33,7 +33,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QColor
 
-from data_manager import (
+from MODULES.data_manager import (
     InHouseDataManager, BASE_DIR, DATABASE_DIR, OUTPUT_DIR,
     BOOKING_CALLS_TODAY_DIR, BOOKING_CALLS_TODAY_JSON,
     save_and_archive_json, resolve_template_path
