@@ -28,11 +28,18 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QDate
 
 from matplotlib.figure import Figure
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-
-from MODULES.data_manager import (
-    InHouseDataManager, HOTEL_DATASET_PATH, BASE_DIR, PLOT_DIR,
-    OUTPUT_DIR, validate_inhouse_file_date, extract_inhouse_report_date
+from OPTIONS._shared_widgets import ChartCardWidget, NonScrollableFigureCanvas
+FigureCanvas = NonScrollableFigureCanvas
+from MODULES.plot_viewer import TraceAnalyticsPlotEngine
+from MODULES.data_manager import InHouseDataManager, DATABASE_DIR, BASE_DIR, HOTEL_DATASET_PATH, PLOT_DIR, OUTPUT_DIR
+from MODULES.trace_analytics import (
+    fuse_inhouse_and_traces,
+    compute_visual_analytics_data,
+    LENS_ALL,
+    LENS_ROOM_STAY,
+    LENS_GR_TRACES,
+    LENS_DIETARY,
+    LENS_CATEGORIES,
 )
 
 
@@ -153,6 +160,7 @@ class ResortStatsDialog(QDialog):
         # Tab 1: Operational Analytics Suite
         self.analytics_scroll = QScrollArea()
         self.analytics_scroll.setWidgetResizable(True)
+        self.analytics_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.analytics_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.analytics_widget = QWidget()
         self.analytics_layout = QVBoxLayout(self.analytics_widget)
@@ -383,11 +391,25 @@ class StatsWidget(QWidget):
         "BLOCK 5000", "BLOCK 6000", "BLOCK 7000", "BLOCK 8000"
     ]
 
+    _canvas_creation_count: int = 0
+
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.data_manager = InHouseDataManager()
         self._is_loading = False
+        self.current_lens = LENS_ALL
+        self.lens_buttons: Dict[str, QPushButton] = {}
         self.block_card_widgets: Dict[str, QFrame] = {}
+        self.active_trace_path: Optional[str] = None
+        try:
+            detected = self.data_manager.scan_for_trace_files()
+            if detected:
+                self.active_trace_path = detected[0]
+        except Exception:
+            pass
+        self.chart_cards: List[ChartCardWidget] = []
+        self.chart_figures: List[Figure] = []
+        self.chart_canvases: List[NonScrollableFigureCanvas] = []
         self._init_ui()
         self.refresh_stats(sync=True)
 
@@ -445,6 +467,78 @@ class StatsWidget(QWidget):
         header.addWidget(btn_popout)
         root_layout.addLayout(header)
 
+        # Import / Sync Trace List Control Bar
+        trace_bar = QFrame()
+        trace_bar.setStyleSheet("""
+            QFrame {
+                background-color: #F8FAFC;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+            }
+        """)
+        tb_layout = QHBoxLayout(trace_bar)
+        tb_layout.setContentsMargins(12, 8, 12, 8)
+        tb_layout.setSpacing(10)
+
+        lbl_tb_icon = QLabel("📥 TRACE LIST ENGINE:")
+        lbl_tb_icon.setStyleSheet("font-weight: 800; color: #1E293B; font-size: 11px;")
+        tb_layout.addWidget(lbl_tb_icon)
+
+        init_file_label = f"📄 {os.path.basename(self.active_trace_path)}" if self.active_trace_path else "No trace file loaded"
+        self.lbl_trace_file = QLabel(init_file_label)
+        self.lbl_trace_file.setStyleSheet("font-size: 11px; color: #0284C7; font-weight: bold;")
+        tb_layout.addWidget(self.lbl_trace_file, stretch=1)
+
+        self.btn_browse_trace = QPushButton("📂 Browse Trace File...")
+        self.btn_browse_trace.setStyleSheet("""
+            QPushButton {
+                background-color: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 4px;
+                padding: 5px 12px;
+                font-size: 11px;
+                font-weight: bold;
+                color: #334155;
+            }
+            QPushButton:hover { background-color: #F1F5F9; }
+        """)
+        self.btn_browse_trace.clicked.connect(self._on_browse_trace_file)
+        tb_layout.addWidget(self.btn_browse_trace)
+
+        self.btn_scan_trace = QPushButton("🔍 Auto-Detect in DATABASE/")
+        self.btn_scan_trace.setStyleSheet("""
+            QPushButton {
+                background-color: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 4px;
+                padding: 5px 12px;
+                font-size: 11px;
+                font-weight: bold;
+                color: #2563EB;
+            }
+            QPushButton:hover { background-color: #EFF6FF; }
+        """)
+        self.btn_scan_trace.clicked.connect(self._on_auto_detect_trace_file)
+        tb_layout.addWidget(self.btn_scan_trace)
+
+        self.btn_sync_trace = QPushButton("⚡ Import & Sync Trace Mappings")
+        self.btn_sync_trace.setStyleSheet("""
+            QPushButton {
+                background-color: #2563EB;
+                border: 1px solid #1D4ED8;
+                border-radius: 4px;
+                padding: 5px 14px;
+                font-size: 11px;
+                font-weight: bold;
+                color: #FFFFFF;
+            }
+            QPushButton:hover { background-color: #1D4ED8; }
+        """)
+        self.btn_sync_trace.clicked.connect(self._on_sync_trace_mappings)
+        tb_layout.addWidget(self.btn_sync_trace)
+
+        root_layout.addWidget(trace_bar)
+
         # Tabs container (Main Tab 0 is the full unified scrollable dashboard)
         self.tabs = QTabWidget()
         self.tabs.setStyleSheet("""
@@ -456,6 +550,7 @@ class StatsWidget(QWidget):
         # Tab 1: Unified Scrollable Analytics Suite
         self.analytics_scroll = QScrollArea()
         self.analytics_scroll.setWidgetResizable(True)
+        self.analytics_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.analytics_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.analytics_widget = QWidget()
         self.analytics_layout = QVBoxLayout(self.analytics_widget)
@@ -517,6 +612,14 @@ class StatsWidget(QWidget):
         self.card_facilities = self._create_kpi_card("Resort Facilities", "28 Venues", "Restaurants, Bars & Pools", "#0D9488")
         self.card_sync = self._create_kpi_card("PMS Sync State", "Not Synced", "DATABASE/HOTEL STATE", "#800020")
 
+        # Segregated Defect & Service Traces KPI Cards
+        self.card_rcr = self._create_kpi_card("Room Change Requests", "0 Requests", "0 Verified Defects | 0.0% Resolved", "#E11D48")
+        self.card_rcr_res_rate = self._create_kpi_card("RCR Resolution Rate", "0.0% Resolved", "0 Moved | 0 N/A | 0 Stayed", "#10B981")
+        self.card_clear_traces = self._create_kpi_card("Clear Service Traces", "0 Actions", "Dietary / VIP / Late Check Out", "#0D9488")
+        self.card_incident_ratio = self._create_kpi_card("Resort Incident Ratio", "0.0%", "0 Occupied Rooms with Defects", "#B91C1C")
+        self.card_dietary_risk = self._create_kpi_card("Dietary Briefing Alert", "0 In-House", "Celiac / Nut / Shellfish Alerts", "#EA580C")
+        self.card_feedback_sentiment = self._create_kpi_card("Guest Feedback Sentiment", "0.0% Positive", "0 Pos | 0 Neu | 0 Neg", "#059669")
+
         self.kpi_grid.addWidget(self.card_capacity, 0, 0)
         self.kpi_grid.addWidget(self.card_inhouse, 0, 1)
         self.kpi_grid.addWidget(self.card_occ, 0, 2)
@@ -525,6 +628,12 @@ class StatsWidget(QWidget):
         self.kpi_grid.addWidget(self.card_moves, 1, 1)
         self.kpi_grid.addWidget(self.card_facilities, 1, 2)
         self.kpi_grid.addWidget(self.card_sync, 1, 3)
+        self.kpi_grid.addWidget(self.card_rcr, 2, 0)
+        self.kpi_grid.addWidget(self.card_rcr_res_rate, 2, 1)
+        self.kpi_grid.addWidget(self.card_clear_traces, 2, 2)
+        self.kpi_grid.addWidget(self.card_incident_ratio, 2, 3)
+        self.kpi_grid.addWidget(self.card_dietary_risk, 3, 0)
+        self.kpi_grid.addWidget(self.card_feedback_sentiment, 3, 1)
         kpi_inner.addLayout(self.kpi_grid)
         self.analytics_layout.addWidget(sec_kpi)
 
@@ -549,19 +658,89 @@ class StatsWidget(QWidget):
         blocks_inner.addLayout(self.block_grid)
         self.analytics_layout.addWidget(sec_blocks)
 
-        # 3. Matplotlib 4-Chart Visual Suite
+        # Top-Level Lens Filter Bar
+        lens_frame = QFrame()
+        lens_frame.setStyleSheet("""
+            QFrame {
+                background-color: #F8FAFC;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                padding: 4px;
+            }
+        """)
+        lens_layout = QHBoxLayout(lens_frame)
+        lens_layout.setContentsMargins(10, 6, 10, 6)
+        lens_layout.setSpacing(10)
+
+        lbl_lens = QLabel("🎯 OPERATIONAL LENS:")
+        lbl_lens.setStyleSheet("font-weight: 800; color: #1E293B; font-size: 11px;")
+        lens_layout.addWidget(lbl_lens)
+
+        self.lens_buttons = {}
+        lenses = [
+            (LENS_ALL, "🌐 All Operations"),
+            (LENS_ROOM_STAY, "🛏️ Room & Stay Requests"),
+            (LENS_GR_TRACES, "🤝 Guest Relations Traces"),
+            (LENS_DIETARY, "🥗 Dietary & Medical"),
+        ]
+
+        for lens_key, lens_label in lenses:
+            btn = QPushButton(lens_label)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda checked=False, lk=lens_key: self._on_lens_selected(lk))
+            self.lens_buttons[lens_key] = btn
+            lens_layout.addWidget(btn)
+
+        lens_layout.addStretch()
+        self.analytics_layout.addWidget(lens_frame)
+
+        # 3. Matplotlib 12-Chart Visual Analytics Suite
         sec_charts = self._create_section_container(
-            "📈 VISUAL ANALYTICS SUITE",
-            "High-DPI analytical charts: room block occupancy, room category distribution, tour operator / agency shares, and turnover flow."
+            "📈 VISUAL ANALYTICS SUITE (12 OPERATIONAL CHARTS)",
+            "High-DPI modular analytical charts: market mix, stay duration, upgrade/downgrade tracker, daily turnover, trace categories, complaint tags, dietary alerts, repeat rooms, status funnel, spatial density, trace sub-categories, and feedback sentiment."
         )
         chart_inner = sec_charts.layout()
+        chart_inner.setSpacing(18)
 
-        self.figure = Figure(figsize=(11, 7.5), dpi=95, facecolor="#FFFFFF")
-        self.canvas = FigureCanvas(self.figure)
-        self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.canvas.setMinimumHeight(620)
-        chart_inner.addWidget(self.canvas)
+        chart_specs = [
+            ("Tour Operator / Market Mix", "Guest share categorized by tour operator / travel agency (operators <2% grouped into Other).", "🌍"),
+            ("Length of Stay Distribution", "Calculated integer nights binned into 1–3, 4–6, 7–9, 10–13, and 14+ nights.", "📅"),
+            ("Room Type Booked vs. Assigned (Upgrade/Downgrade Tracker)", "Comparison between Booked and Assigned room types tracking upgrades and downgrades.", "🔄"),
+            ("Daily Arrivals & Departures", "Chronological check-in and check-out volume across the active date window.", "✈️"),
+            ("Trace Category Breakdown", "Frequency volume across primary Guest Relation trace categories.", "📑"),
+            ("Room Change Request: Reason Tagging", "Deterministic keyword classification of free-text complaint notes.", "🏷️"),
+            ("Allergy & Dietary Requirement Frequency", "Occurrences of dietary tokens parsed from allergy traces.", "🥗"),
+            ("Repeat-Issue Rooms (Occurrences ≥ 2)", "Ranked rooms with 2 or more traces logged, highlighting recurring complaint tags.", "⚠️"),
+            ("Trace Status Lifecycle Funnel", "Trace categories breakdown stacked by lifecycle status.", "📊"),
+            ("Resort Spatial Complaint Density (Block vs. Floor)", "2D heatmap matrix of complaint concentration across accommodation blocks and floors.", "🗺️"),
+            ("Trace Sub-Category Breakdown", "Deep-dive operational classification of generic Trace items (Room Follow-up, Feedback, Maintenance, Complaints, Front Desk).", "🔍"),
+            ("Guest Feedback Sentiment Split", "Distribution of guest feedback sentiment (Positive, Neutral, Negative) parsed from Feedback entries.", "💬")
+        ]
+
+        self.chart_cards = []
+        self.chart_figures = []
+        self.chart_canvases = []
+
+        for idx, (title, sub, icon) in enumerate(chart_specs):
+            card = ChartCardWidget(title=title, subtitle=sub, icon=icon, min_canvas_height=390)
+            fig = Figure(figsize=(10, 4.0), dpi=100, facecolor="#FFFFFF")
+            canvas = NonScrollableFigureCanvas(fig)
+            card.set_canvas(canvas)
+            StatsWidget._canvas_creation_count += 1
+            safe_title = title.encode("ascii", "replace").decode("ascii")
+            print(f"[StatsWidget] Canvas instance #{StatsWidget._canvas_creation_count} initialized (chart {idx}: {safe_title})")
+
+            self.chart_cards.append(card)
+            self.chart_figures.append(fig)
+            self.chart_canvases.append(canvas)
+            chart_inner.addWidget(card)
+
+        # Backward compatibility aliases for existing tests
+        self.figure = self.chart_figures[0]
+        self.canvas = self.chart_canvases[0]
+
         self.analytics_layout.addWidget(sec_charts)
+        self._on_lens_selected(LENS_ALL)
 
         # 4. Categorical Breakdown Cards
         sec_breakdowns = self._create_section_container(
@@ -643,6 +822,7 @@ class StatsWidget(QWidget):
         man_inner.addLayout(man_bar)
 
         self.table_inhouse = QTableWidget(0, 8)
+        self.table_inhouse.setSizeAdjustPolicy(QTableWidget.SizeAdjustPolicy.AdjustToContents)
         self.table_inhouse.setHorizontalHeaderLabels([
             "Room", "Booking ID", "Guest Name(s)", "Arrival", "Departure", "Room Type", "Agency", "Meal Plan"
         ])
@@ -660,67 +840,6 @@ class StatsWidget(QWidget):
         man_inner.addWidget(self.table_inhouse)
         self.analytics_layout.addWidget(sec_manifest)
 
-        # 6. Quick Actions Section in Scroll
-        sec_qa = self._create_section_container(
-            "⚡ QUICK INGESTION & DATA REFRESH",
-            "Load today's PMS export directly, refresh block JSON files, and access database directories."
-        )
-        qa_inner = sec_qa.layout()
-
-        self.lbl_inhouse_status = QLabel("⚠️ Checking in-house status...")
-        self.lbl_inhouse_status.setStyleSheet("background-color: #FEF2F2; color: #991B1B; font-weight: bold; padding: 8px 12px; border: 1px solid #FECACA; border-radius: 6px;")
-        qa_inner.addWidget(self.lbl_inhouse_status)
-
-        qa_btn_row = QHBoxLayout()
-        self.btn_quick_load = QPushButton("📂 Load In-House List (.xlsx / .csv)")
-        self.btn_quick_load.setStyleSheet("""
-            QPushButton {
-                background-color: #1E3A8A;
-                color: white;
-                font-weight: bold;
-                font-size: 13px;
-                padding: 8px 20px;
-                border-radius: 6px;
-                border: none;
-            }
-            QPushButton:hover { background-color: #2563EB; }
-        """)
-        self.btn_quick_load.clicked.connect(self._quick_load_inhouse)
-        qa_btn_row.addWidget(self.btn_quick_load)
-
-        btn_refresh_blocks = QPushButton("🔄 Refresh Block Exports")
-        btn_refresh_blocks.setStyleSheet("""
-            QPushButton { background-color: #065F46; color: white; font-weight: bold; padding: 8px 16px; border-radius: 4px; border: none; }
-            QPushButton:hover { background-color: #059669; }
-        """)
-        btn_refresh_blocks.clicked.connect(self._quick_refresh_blocks)
-        qa_btn_row.addWidget(btn_refresh_blocks)
-
-        btn_open_database = QPushButton("📁 Open DATABASE")
-        btn_open_database.setStyleSheet("""
-            QPushButton { background-color: #475569; color: white; font-weight: bold; padding: 8px 14px; border-radius: 4px; border: none; }
-            QPushButton:hover { background-color: #334155; }
-        """)
-        btn_open_database.clicked.connect(lambda: self._open_output_folder(None, os.path.join(BASE_DIR, "DATABASE")))
-        qa_btn_row.addWidget(btn_open_database)
-
-        btn_open_output = QPushButton("📁 Open OUTPUT")
-        btn_open_output.setStyleSheet("""
-            QPushButton { background-color: #475569; color: white; font-weight: bold; padding: 8px 14px; border-radius: 4px; border: none; }
-            QPushButton:hover { background-color: #334155; }
-        """)
-        btn_open_output.clicked.connect(lambda: self._open_output_folder(None, OUTPUT_DIR))
-        qa_btn_row.addWidget(btn_open_output)
-
-        qa_btn_row.addStretch()
-        qa_inner.addLayout(qa_btn_row)
-
-        self.lbl_activity_log = QLabel("No recent activity recorded.")
-        self.lbl_activity_log.setStyleSheet("color: #475569; font-size: 11px; padding: 6px; border: none;")
-        self.lbl_activity_log.setWordWrap(True)
-        qa_inner.addWidget(self.lbl_activity_log)
-        self.analytics_layout.addWidget(sec_qa)
-
         self.analytics_scroll.setWidget(self.analytics_widget)
         self.tabs.addTab(self.analytics_scroll, "📈 Visual Analytics Suite")
 
@@ -735,6 +854,7 @@ class StatsWidget(QWidget):
 
         # Embedded reference to the table or clone
         self.table_inhouse_standalone = QTableWidget(0, 8)
+        self.table_inhouse_standalone.setSizeAdjustPolicy(QTableWidget.SizeAdjustPolicy.AdjustToContents)
         self.table_inhouse_standalone.setHorizontalHeaderLabels([
             "Room", "Booking ID", "Guest Name(s)", "Arrival", "Departure", "Room Type", "Agency", "Meal Plan"
         ])
@@ -743,18 +863,6 @@ class StatsWidget(QWidget):
         self.table_inhouse_standalone.setSortingEnabled(True)
         tt_layout.addWidget(self.table_inhouse_standalone)
         self.tabs.addTab(self.tab_table, "📋 Guest Manifest Table")
-
-        # Tab 3: Dedicated Quick Actions
-        self.tab_actions = QWidget()
-        qa_tab_layout = QVBoxLayout(self.tab_actions)
-        qa_tab_layout.setContentsMargins(16, 16, 16, 16)
-        qa_tab_layout.setSpacing(14)
-        lbl_qa_head = QLabel("Operational Tools & System Management")
-        lbl_qa_head.setStyleSheet("font-size: 14px; font-weight: bold; color: #800020;")
-        qa_tab_layout.addWidget(lbl_qa_head)
-        qa_tab_layout.addWidget(self._create_kpi_card("Quick Actions", "PMS Sync Ready", "Select an action below", "#800020"))
-        qa_tab_layout.addStretch()
-        self.tabs.addTab(self.tab_actions, "⚡ Quick Actions")
 
         root_layout.addWidget(self.tabs, stretch=1)
 
@@ -914,6 +1022,85 @@ class StatsWidget(QWidget):
         dlg = ResortStatsDialog(parent=self)
         dlg.exec()
 
+    def _on_lens_selected(self, active_lens: str) -> None:
+        """Filters charts and KPI cards according to the chosen operational lens."""
+        self.current_lens = active_lens
+
+        # Update button styling
+        for lens_key, btn in self.lens_buttons.items():
+            if lens_key == active_lens:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #2563EB;
+                        color: #FFFFFF;
+                        font-weight: 800;
+                        border: 1px solid #1D4ED8;
+                        border-radius: 5px;
+                        padding: 6px 14px;
+                        font-size: 11.5px;
+                    }
+                """)
+            else:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #FFFFFF;
+                        color: #475569;
+                        font-weight: 600;
+                        border: 1px solid #CBD5E1;
+                        border-radius: 5px;
+                        padding: 6px 14px;
+                        font-size: 11.5px;
+                    }
+                    QPushButton:hover {
+                        background-color: #F1F5F9;
+                        color: #1E293B;
+                    }
+                """)
+
+        # Filter Charts
+        chart_lens_map = {
+            0: {LENS_ALL},                  # Market Mix
+            1: {LENS_ALL},                  # Length of Stay
+            2: {LENS_ALL, LENS_ROOM_STAY},  # Room Type Booked vs Assigned
+            3: {LENS_ALL},                  # Daily Arrivals & Departures
+            4: {LENS_ALL, LENS_GR_TRACES},  # Trace Category Breakdown
+            5: {LENS_ALL, LENS_ROOM_STAY},  # RCR Reason Tagging
+            6: {LENS_ALL, LENS_DIETARY},    # Allergy & Dietary
+            7: {LENS_ALL, LENS_ROOM_STAY},  # Repeat-Issue Rooms
+            8: {LENS_ALL, LENS_GR_TRACES},  # Trace Status Funnel
+            9: {LENS_ALL, LENS_ROOM_STAY},  # Spatial Density
+            10: {LENS_ALL, LENS_GR_TRACES}, # Trace Sub-Category Breakdown (Chart 11)
+            11: {LENS_ALL, LENS_GR_TRACES}, # Guest Feedback Sentiment Split (Chart 12)
+        }
+
+        for idx, card in enumerate(self.chart_cards):
+            allowed_lenses = chart_lens_map.get(idx, {LENS_ALL})
+            is_visible = (active_lens == LENS_ALL) or (active_lens in allowed_lenses)
+            card.setVisible(is_visible)
+
+        # Filter / Emphasize KPI Cards
+        if hasattr(self, "card_capacity") and hasattr(self, "card_feedback_sentiment"):
+            kpi_lens_map = {
+                self.card_capacity: {LENS_ALL, LENS_ROOM_STAY},
+                self.card_inhouse: {LENS_ALL, LENS_ROOM_STAY, LENS_GR_TRACES, LENS_DIETARY},
+                self.card_occ: {LENS_ALL, LENS_ROOM_STAY},
+                self.card_arrivals: {LENS_ALL, LENS_ROOM_STAY},
+                self.card_checkouts: {LENS_ALL, LENS_ROOM_STAY},
+                self.card_moves: {LENS_ALL, LENS_ROOM_STAY},
+                self.card_facilities: {LENS_ALL},
+                self.card_sync: {LENS_ALL, LENS_GR_TRACES},
+                self.card_rcr: {LENS_ALL, LENS_ROOM_STAY},
+                self.card_rcr_res_rate: {LENS_ALL, LENS_ROOM_STAY},
+                self.card_clear_traces: {LENS_ALL, LENS_GR_TRACES},
+                self.card_incident_ratio: {LENS_ALL, LENS_ROOM_STAY},
+                self.card_dietary_risk: {LENS_ALL, LENS_DIETARY},
+                self.card_feedback_sentiment: {LENS_ALL, LENS_GR_TRACES},
+            }
+
+            for card, lenses in kpi_lens_map.items():
+                if card is not None:
+                    card.setVisible((active_lens == LENS_ALL) or (active_lens in lenses))
+
     # -----------------------------------------------------------------
     # Stats Refresh Engine
     # -----------------------------------------------------------------
@@ -965,7 +1152,23 @@ class StatsWidget(QWidget):
 
     def _fetch_all_stats_data(self) -> Dict[str, Any]:
         """Fetches data from disk and computes live occupancy and turnover metrics."""
-        master = self.data_manager.load_master_state() or {}
+        # Stage 1: Load active In-House State
+        in_house_data = self.data_manager.load_master_state()
+        if not in_house_data and os.path.exists(DATABASE_DIR):
+            in_house_files = [f for f in os.listdir(DATABASE_DIR) if "in_house" in f.lower() or "παραμένοντες" in f.lower()]
+            if in_house_files:
+                in_house_data = self.data_manager.parse_in_house_file(os.path.join(DATABASE_DIR, in_house_files[0]))
+
+        # Stage 2: Load and Bind Traces
+        trace_path = self.active_trace_path or (self.data_manager.scan_for_trace_files() or [None])[0]
+        traces = self.data_manager.parse_trace_file(trace_path) if trace_path and os.path.exists(trace_path) else []
+
+        # Stage 3: Unified Fusion
+        from MODULES.trace_analytics import fuse_inhouse_and_traces, compute_visual_analytics_data
+        unified_dataset = fuse_inhouse_and_traces(in_house_data or {}, traces, hotel_dataset_path=HOTEL_DATASET_PATH)
+        master = unified_dataset.get("in_house", in_house_data or {})
+        trace_items = unified_dataset.get("traces", traces)
+
         meta = self.data_manager.load_metadata() or {}
         checkouts = self.data_manager.load_checkouts_history() or {}
         moves = self.data_manager.load_room_moves_history() or []
@@ -1096,6 +1299,13 @@ class StatsWidget(QWidget):
 
         doc_counts = self._count_documents()
 
+        trace_analytics = compute_visual_analytics_data(
+            trace_items,
+            in_house_manifest=master,
+            hotel_dataset_path=HOTEL_DATASET_PATH,
+            room_moves_path=self.data_manager.room_moves_path
+        )
+
         return {
             "master": master,
             "meta": meta,
@@ -1120,6 +1330,8 @@ class StatsWidget(QWidget):
             "all_blocks_info": all_blocks_info,
             "sorted_bookings": sorted_bookings,
             "doc_counts": doc_counts,
+            "trace_analytics": trace_analytics,
+            "unified_dataset": unified_dataset,
         }
 
     def _apply_stats_data(self, data: Dict[str, Any]) -> None:
@@ -1130,6 +1342,17 @@ class StatsWidget(QWidget):
         total_bookings = data.get("total_bookings", 0)
         total_guests = data.get("total_guests", 0)
         occ_pct = data.get("occ_pct", 0.0)
+
+        # Update trace control bar file label
+        if hasattr(self, "lbl_trace_file"):
+            if self.active_trace_path and os.path.exists(self.active_trace_path):
+                f_name = os.path.basename(self.active_trace_path)
+                t_count = data.get("trace_analytics", {}).get("total_traces", 0)
+                self.lbl_trace_file.setText(f"📄 {f_name}  ({t_count} traces active)")
+                self.lbl_trace_file.setStyleSheet("font-size: 11px; color: #0284C7; font-weight: bold;")
+            else:
+                self.lbl_trace_file.setText("No trace file loaded")
+                self.lbl_trace_file.setStyleSheet("font-size: 11px; color: #94A3B8; font-style: italic;")
 
         # Progress bar
         self.progress_occ.setValue(min(100, int(round(occ_pct))))
@@ -1183,6 +1406,63 @@ class StatsWidget(QWidget):
             last_ts = str(last_ts).split(".")[0].replace("T", " ")
         self.card_sync.lbl_main.setText(str(last_dt))
         self.card_sync.lbl_sub.setText(f"Updated: {last_ts}" if last_ts else "No timestamp")
+
+        # Update Segregated Defect & Service Traces KPI Cards
+        trace_analytics = data.get("trace_analytics", {})
+        unified = data.get("unified_dataset", {})
+
+        rcr_data = trace_analytics.get("rcr_analytics", {})
+        tot_rcr = rcr_data.get("total_move_requests", 0)
+        ver_def = rcr_data.get("verified_defects", 0)
+        res_rate = rcr_data.get("resolution_rate", 0.0)
+        if hasattr(self, "card_rcr"):
+            self.card_rcr.lbl_main.setText(f"{tot_rcr} Requests")
+            self.card_rcr.lbl_sub.setText(f"{ver_def} Defects | {res_rate:.1f}% Resolved")
+
+        # RCR Resolution Rate KPI Card
+        rcr_res = rcr_data.get("resolution_breakdown", {})
+        res_moved = rcr_res.get("Resolved / Moved", 0)
+        res_pending = rcr_res.get("Pending / Unresolved", 0)
+        res_att = rcr_res.get("Attempted / No Answer", 0)
+        res_stay = rcr_res.get("Decided to Stay", 0)
+        tot_rcr_cases = res_moved + res_pending + res_att + res_stay
+        res_pct = (res_moved / tot_rcr_cases * 100.0) if tot_rcr_cases > 0 else 0.0
+        if hasattr(self, "card_rcr_res_rate"):
+            self.card_rcr_res_rate.lbl_main.setText(f"{res_pct:.1f}% Resolved")
+            self.card_rcr_res_rate.lbl_sub.setText(f"{res_moved} Moved | {res_att} N/A | {res_stay} Stayed")
+
+        clr_data = trace_analytics.get("clear_trace_analytics", {})
+        tot_clr = clr_data.get("total_courtesy_actions", 0)
+        vip_cnt = clr_data.get("vip_amenity_deliveries", 0)
+        late_co = clr_data.get("late_checkout_count", 0)
+        if hasattr(self, "card_clear_traces"):
+            self.card_clear_traces.lbl_main.setText(f"{tot_clr} Actions")
+            self.card_clear_traces.lbl_sub.setText(f"VIP/Offers: {vip_cnt} | Late CO: {late_co}")
+
+        inc_ratio = unified.get("incident_ratio", 0.0)
+        def_rms = unified.get("occupied_rooms_with_defects", 0)
+        tot_occ = unified.get("total_occupied_rooms", total_bookings)
+        if hasattr(self, "card_incident_ratio"):
+            self.card_incident_ratio.lbl_main.setText(f"{inc_ratio:.1f}%")
+            self.card_incident_ratio.lbl_sub.setText(f"{def_rms} Defective / {tot_occ} Occupied")
+
+        diet_data = trace_analytics.get("dietary_risk_index", {})
+        tot_aff = diet_data.get("total_affected_guests", 0)
+        high_risk = diet_data.get("high_risk_count", 0)
+        if hasattr(self, "card_dietary_risk"):
+            self.card_dietary_risk.lbl_main.setText(f"{tot_aff} Guests")
+            self.card_dietary_risk.lbl_sub.setText(f"High Severity: {high_risk} (Celiac/Nuts)")
+
+        # Feedback Sentiment KPI Card
+        sent_split = trace_analytics.get("feedback_sentiment_split", {})
+        fb_total = sent_split.get("total_feedback", 0)
+        fb_pos = sent_split.get("positive", 0)
+        fb_neu = sent_split.get("neutral", 0)
+        fb_neg = sent_split.get("negative", 0)
+        pos_rate = sent_split.get("positive_pct", 0.0)
+        if hasattr(self, "card_feedback_sentiment"):
+            self.card_feedback_sentiment.lbl_main.setText(f"{pos_rate:.1f}% Positive")
+            self.card_feedback_sentiment.lbl_sub.setText(f"{fb_pos} Pos | {fb_neu} Neu | {fb_neg} Neg ({fb_total} Notes)")
 
         # Update Block Occupancy Meter Cards
         all_blocks_info = data.get("all_blocks_info", [])
@@ -1252,22 +1532,6 @@ class StatsWidget(QWidget):
         self.card_cakes_count.lbl_main.setText(f"{doc_counts['cakes']} Documents")
         self.card_cakes_count.lbl_sub.setText("Total in Output Storage")
 
-        # In-House status banner
-        if hasattr(self, "lbl_inhouse_status"):
-            sync_date = meta.get("last_sync_date") or meta.get("last_processed_date")
-            if sync_date:
-                ts_display = str(meta.get("last_updated_at", "")).split(".")[0].replace("T", " ") if meta.get("last_updated_at") else "N/A"
-                self.lbl_inhouse_status.setText(
-                    f"✅ Loaded: {sync_date}  |  {total_bookings} Bookings  |  Last PMS sync: {ts_display}"
-                )
-                self.lbl_inhouse_status.setStyleSheet("background-color: #ECFDF5; color: #065F46; font-weight: bold; padding: 8px 12px; border: 1px solid #A7F3D0; border-radius: 6px;")
-            else:
-                self.lbl_inhouse_status.setText("⚠️ No In-House List loaded yet")
-                self.lbl_inhouse_status.setStyleSheet("background-color: #FEF2F2; color: #991B1B; font-weight: bold; padding: 8px 12px; border: 1px solid #FECACA; border-radius: 6px;")
-
-        if hasattr(self, "lbl_activity_log"):
-            self.lbl_activity_log.setText(self._build_activity_log(meta))
-
         # Populate Manifest Tables
         self._populate_manifest_table(self.table_inhouse, data.get("sorted_bookings", []))
         if hasattr(self, "table_inhouse_standalone"):
@@ -1301,105 +1565,175 @@ class StatsWidget(QWidget):
         else:
             data = self._fetch_all_stats_data()
 
-        self.figure.clear()
-        axs = self.figure.subplots(2, 2)
-        ax1, ax2 = axs[0, 0], axs[0, 1]
-        ax3, ax4 = axs[1, 0], axs[1, 1]
+        trace_data = data.get("trace_analytics", {})
 
-        # Chart 1: Occupancy Rate per Room Block (%)
-        target_blocks = data.get("target_blocks", [])
-        percentages = data.get("block_percentages", [])
-        labels = [b.replace("BLOCK ", "") for b in target_blocks]
-        bar_colors = [
-            "#2563EB" if p < 75 else ("#D97706" if p < 90 else "#DC2626")
-            for p in percentages
-        ]
+        if hasattr(self, "chart_figures") and len(self.chart_figures) >= 10:
+            # 1. Market Mix
+            TraceAnalyticsPlotEngine.render_tour_operator_mix(self.chart_figures[0], trace_data)
+            self.chart_canvases[0].draw_idle()
+            top_op = trace_data.get("tour_operator_mix", [{}])[0].get("operator", "N/A") if trace_data.get("tour_operator_mix") else "N/A"
+            self.chart_cards[0].set_badges([("Top Market", top_op[:18], "#2563EB"), ("Markets Count", len(trace_data.get("tour_operator_mix", [])), "#059669")])
 
-        bars = ax1.bar(labels, percentages, color=bar_colors, width=0.65, edgecolor="#1E293B", linewidth=0.5)
-        ax1.set_title("Occupancy Rate per Room Block (%)", fontsize=10, fontweight="bold", color="#800020", pad=6)
-        ax1.set_ylim(0, 115)
-        ax1.set_ylabel("Occupancy %", fontsize=8, color="#475569")
-        ax1.tick_params(axis="x", rotation=45, labelsize=7.5)
-        ax1.tick_params(axis="y", labelsize=7.5)
-        ax1.grid(axis="y", linestyle="--", alpha=0.4)
-        for bar, pct in zip(bars, percentages):
-            ax1.text(bar.get_x() + bar.get_width() / 2.0, bar.get_height() + 2, f"{pct:.0f}%",
-                     ha="center", va="bottom", fontsize=6.5, fontweight="bold", color="#1E293B")
+            # 2. Length of Stay
+            TraceAnalyticsPlotEngine.render_length_of_stay(self.chart_figures[1], trace_data)
+            self.chart_canvases[1].draw_idle()
+            stay_b = trace_data.get("length_of_stay_dist", {})
+            peak_stay = max(stay_b.items(), key=lambda x: x[1])[0] if stay_b and any(stay_b.values()) else "N/A"
+            self.chart_cards[1].set_badges([("Peak Duration", peak_stay, "#3B82F6"), ("7-9 Nights", stay_b.get("7-9 nights", 0), "#1D4ED8")])
 
-        # Chart 2: Room Category Distribution (Donut Chart)
-        room_types = data.get("room_types_for_chart", collections.Counter())
-        if room_types:
-            top_types = room_types.most_common(6)
-            other_cnt = sum(c for _, c in room_types.most_common()[6:])
-            if other_cnt > 0:
-                top_types.append(("Other", other_cnt))
-            pie_labels = [k for k, _ in top_types]
-            pie_vals = [v for _, v in top_types]
-            colors = ["#2563EB", "#7C3AED", "#059669", "#D97706", "#DC2626", "#EC4899", "#64748B"]
-            wedges, texts, autotexts = ax2.pie(
-                pie_vals, labels=pie_labels, autopct="%1.0f%%", pctdistance=0.75,
-                colors=colors[:len(pie_vals)], wedgeprops=dict(width=0.45, edgecolor="white", linewidth=1.5),
-                textprops=dict(fontsize=7.5, fontweight="bold")
+            # 3. Upgrade / Downgrade Tracker
+            TraceAnalyticsPlotEngine.render_room_type_upgrade_downgrade(self.chart_figures[2], trace_data)
+            self.chart_canvases[2].draw_idle()
+            up_info = trace_data.get("room_type_upgrade_downgrade", {})
+            self.chart_cards[2].set_badges([
+                ("Upgrades", up_info.get("upgrade", 0), "#3B82F6"),
+                ("Downgrades", up_info.get("downgrade", 0), "#EF4444"),
+                ("Exact Matches", up_info.get("exact_match", 0), "#10B981")
+            ])
+
+            # 4. Daily Arrivals & Departures
+            TraceAnalyticsPlotEngine.render_daily_arrivals_departures(self.chart_figures[3], trace_data)
+            self.chart_canvases[3].draw_idle()
+            moves = trace_data.get("daily_arrivals_departures", [])
+            tot_arr = sum(m.get("arrivals", 0) for m in moves)
+            tot_dep = sum(m.get("departures", 0) for m in moves)
+            self.chart_cards[3].set_badges([("Total Arrivals", tot_arr, "#2563EB"), ("Total Departures", tot_dep, "#D97706")])
+
+            # 5. Trace Category Breakdown
+            TraceAnalyticsPlotEngine.render_trace_category_breakdown(self.chart_figures[4], trace_data)
+            self.chart_canvases[4].draw_idle()
+            cats = trace_data.get("trace_category_breakdown", [])
+            top_cat = cats[0]["category"] if cats else "N/A"
+            self.chart_cards[4].set_badges([("Total Traces", trace_data.get("total_traces", 0), "#4338CA"), ("Top Category", top_cat, "#6366F1")])
+
+            # 6. Room Change Request Reason Tagging
+            TraceAnalyticsPlotEngine.render_rcr_reason_tagging(self.chart_figures[5], trace_data)
+            self.chart_canvases[5].draw_idle()
+            rcr_tags = trace_data.get("rcr_reason_tagging", [])
+            top_rcr = rcr_tags[0]["reason"] if rcr_tags else "N/A"
+            self.chart_cards[6].set_badges([("Primary Complaint", top_rcr, "#DC2626"), ("Reason Categories", len(rcr_tags), "#D97706")])
+
+            # 7. Allergy & Dietary Requirement Frequency
+            TraceAnalyticsPlotEngine.render_allergy_dietary_frequency(self.chart_figures[6], trace_data)
+            self.chart_canvases[6].draw_idle()
+            allg = trace_data.get("allergy_dietary_frequency", [])
+            top_allg = allg[0]["allergen"] if allg else "None"
+            tot_allg = sum(a.get("count", 0) for a in allg)
+            self.chart_cards[6].set_badges([("Top Dietary Alert", top_allg, "#D97706"), ("Affected Guests", tot_allg, "#2563EB")])
+
+            # 8. Repeat-Issue Rooms
+            TraceAnalyticsPlotEngine.render_repeat_issue_rooms(self.chart_figures[7], trace_data)
+            self.chart_canvases[7].draw_idle()
+            rep_rms = trace_data.get("repeat_issue_rooms", [])
+            self.chart_cards[7].set_badges([("Problem Rooms (≥2)", len(rep_rms), "#DC2626" if rep_rms else "#059669")])
+
+            # 9. Trace Status Funnel
+            TraceAnalyticsPlotEngine.render_trace_status_funnel(self.chart_figures[8], trace_data)
+            self.chart_canvases[8].draw_idle()
+            funnel = trace_data.get("trace_status_funnel", {})
+            self.chart_cards[8].set_badges([("Lifecycle Statuses", len(funnel.get("statuses", [])), "#2563EB"), ("Categories Tracked", len(funnel.get("categories", [])), "#059669")])
+
+            # 10. Block / Floor Complaint Density
+            TraceAnalyticsPlotEngine.render_block_floor_density(self.chart_figures[9], trace_data)
+            self.chart_canvases[9].draw_idle()
+            density_matrix = trace_data.get("block_floor_complaint_density", {})
+            blocks = density_matrix.get("blocks", [])
+            self.chart_cards[9].set_badges([("Monitored Blocks", len(blocks), "#1E293B"), ("Floors per Block", 3, "#475569")])
+
+            # 11. Trace Sub-Category Breakdown
+            if len(self.chart_figures) > 10:
+                TraceAnalyticsPlotEngine.render_trace_subcategory_breakdown(self.chart_figures[10], trace_data)
+                self.chart_canvases[10].draw_idle()
+                subcats = trace_data.get("trace_subcategory_breakdown", [])
+                top_subcat = subcats[0]["subcategory"] if subcats else "N/A"
+                tot_sub = sum(s.get("count", 0) for s in subcats)
+                self.chart_cards[10].set_badges([("Total Traces", tot_sub, "#3B82F6"), ("Top Sub-Category", top_subcat, "#8B5CF6")])
+
+            # 12. Feedback Sentiment Split
+            if len(self.chart_figures) > 11:
+                TraceAnalyticsPlotEngine.render_feedback_sentiment_split(self.chart_figures[11], trace_data)
+                self.chart_canvases[11].draw_idle()
+                sent_data = trace_data.get("feedback_sentiment_split", {})
+                tot_fb = sent_data.get("total_feedback", 0)
+                pos_pct = sent_data.get("positive_pct", 0.0)
+                self.chart_cards[11].set_badges([("Feedback Notes", tot_fb, "#0D9488"), ("Positive %", f"{pos_pct:.1f}%", "#10B981")])
+
+    # -----------------------------------------------------------------
+    # Trace File Handling & Room Mapping Callbacks
+    # -----------------------------------------------------------------
+    def _on_browse_trace_file(self) -> None:
+        """Opens a file picker dialog supporting .xlsx, .xls, .csv."""
+        start_dir = DATABASE_DIR if os.path.exists(DATABASE_DIR) else BASE_DIR
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Trace List Export File",
+            start_dir,
+            "Trace Export Files (*.xlsx *.xls *.csv);;Excel Files (*.xlsx *.xls);;CSV Files (*.csv);;All Files (*.*)"
+        )
+        if file_path:
+            self.active_trace_path = file_path
+            f_name = os.path.basename(file_path)
+            self.lbl_trace_file.setText(f"📄 {f_name}")
+            self.lbl_trace_file.setStyleSheet("font-size: 11px; color: #0284C7; font-weight: bold;")
+            self.refresh_stats(sync=False)
+
+    def _on_auto_detect_trace_file(self) -> None:
+        """Scans DATABASE/ for trace list export files and auto-selects the best candidate."""
+        detected = self.data_manager.scan_for_trace_files()
+        if detected:
+            self.active_trace_path = detected[0]
+            f_name = os.path.basename(detected[0])
+            self.lbl_trace_file.setText(f"📄 {f_name} (Auto-detected)")
+            self.lbl_trace_file.setStyleSheet("font-size: 11px; color: #059669; font-weight: bold;")
+            self.refresh_stats(sync=False)
+            QMessageBox.information(
+                self,
+                "Trace List Detected",
+                f"Successfully located trace list file:\n{detected[0]}\n\nFile loaded into Visual Analytics."
             )
-            for at in autotexts:
-                at.set_fontsize(7)
-                at.set_color("white")
-            ax2.set_title("Guest Room Category Distribution", fontsize=10, fontweight="bold", color="#800020", pad=6)
         else:
-            ax2.text(0.5, 0.5, "No In-House Data", ha="center", va="center", color="#94A3B8")
-            ax2.set_title("Guest Room Category Distribution", fontsize=10, fontweight="bold", color="#800020")
+            QMessageBox.warning(
+                self,
+                "No Trace File Found",
+                f"No trace list files (.xlsx, .xls, .csv) were found in:\n{DATABASE_DIR}\n\nPlease use 'Browse...' to select a file manually."
+            )
 
-        # Chart 3: Operational Turnover (Arrivals vs. In-House vs. Departures)
-        arrivals = data.get("arrivals", {})
-        arr_cnt = len(arrivals)
-        inhouse_cnt = data.get("total_bookings", 0)
-        today_cos = data.get("today_cos", 0)
+    def _on_sync_trace_mappings(self) -> None:
+        """Parses the active trace file and generates idempotent ROOMS/<room_number>.json mappings."""
+        target_path = self.active_trace_path
+        if not target_path or not os.path.exists(target_path):
+            detected = self.data_manager.scan_for_trace_files()
+            if detected:
+                target_path = detected[0]
+                self.active_trace_path = target_path
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Missing Trace File",
+                    "Please select or auto-detect a trace list file before syncing room mappings."
+                )
+                return
 
-        flow_labels = ["Arrivals", "In-House", "Departures"]
-        flow_vals = [arr_cnt, inhouse_cnt, today_cos]
-        flow_colors = ["#3B82F6", "#10B981", "#EF4444"]
-
-        f_bars = ax3.bar(flow_labels, flow_vals, color=flow_colors, width=0.55, edgecolor="#1E293B", linewidth=0.5)
-        ax3.set_title("Operational Turnover Overview", fontsize=10, fontweight="bold", color="#800020", pad=6)
-        ax3.set_ylabel("Count", fontsize=8, color="#475569")
-        ax3.tick_params(axis="x", labelsize=8)
-        ax3.tick_params(axis="y", labelsize=7.5)
-        ax3.grid(axis="y", linestyle="--", alpha=0.4)
-        for bar, val in zip(f_bars, flow_vals):
-            ax3.text(bar.get_x() + bar.get_width() / 2.0, bar.get_height() + (max(flow_vals) * 0.02 + 1), str(val),
-                     ha="center", va="bottom", fontsize=7.5, fontweight="bold", color="#1E293B")
-        if max(flow_vals) > 0:
-            ax3.set_ylim(0, max(flow_vals) * 1.18)
-
-        # Chart 4: Debtor / Agency Distribution
-        agencies = data.get("agency_counter", collections.Counter())
-        if agencies:
-            top_agencies = agencies.most_common(7)
-            top_agencies.reverse()
-            ag_names = [a[0][:20] + "..." if len(a[0]) > 20 else a[0] for a in top_agencies]
-            ag_counts = [a[1] for a in top_agencies]
-            h_bars = ax4.barh(ag_names, ag_counts, color="#4F46E5", height=0.6, edgecolor="#1E293B", linewidth=0.5)
-            ax4.set_title("Top Debtor / Agency Distribution", fontsize=10, fontweight="bold", color="#800020", pad=6)
-            ax4.set_xlabel("Guests", fontsize=8, color="#475569")
-            ax4.tick_params(axis="y", labelsize=7.5)
-            ax4.tick_params(axis="x", labelsize=7.5)
-            ax4.grid(axis="x", linestyle="--", alpha=0.4)
-            for bar, val in zip(h_bars, ag_counts):
-                ax4.text(bar.get_width() + 2, bar.get_y() + bar.get_height() / 2.0, str(val),
-                         ha="left", va="center", fontsize=7, fontweight="bold", color="#1E293B")
-            if max(ag_counts) > 0:
-                ax4.set_xlim(0, max(ag_counts) * 1.15)
-        else:
-            ax4.text(0.5, 0.5, "No In-House Data", ha="center", va="center", color="#94A3B8")
-            ax4.set_title("Top Debtor / Agency Distribution", fontsize=10, fontweight="bold", color="#800020")
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            try:
-                self.figure.tight_layout(pad=1.8)
-            except Exception:
-                self.figure.subplots_adjust(top=0.92, bottom=0.08, left=0.08, right=0.95, hspace=0.35, wspace=0.25)
-        self.canvas.draw()
+        try:
+            res = self.data_manager.generate_room_json_mappings(file_path=target_path)
+            self.refresh_stats(sync=True)
+            QMessageBox.information(
+                self,
+                "Trace Sync & Room Mapping Complete",
+                f"Successfully synced trace list to ROOMS/:\n"
+                f"• Target Directory: {res.get('rooms_directory', 'ROOMS/')}\n"
+                f"• Processed Rooms: {res.get('total_rooms_processed', 0)}\n"
+                f"• Created Files: {res.get('created', 0)}\n"
+                f"• Updated Files: {res.get('updated', 0)}\n"
+                f"• Total Traces Mapped: {res.get('total_traces_synced', 0)}\n\n"
+                f"All 10 Visual Analytics charts updated."
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Trace Sync Error",
+                f"An error occurred while generating room mappings:\n{str(e)}"
+            )
 
     # -----------------------------------------------------------------
     # Manifest Filtering & Quick Actions
@@ -1456,121 +1790,6 @@ class StatsWidget(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", f"Could not export manifest:\n{e}")
 
-    def _prompt_for_operational_date(self, title: str, message: str, default_date: Optional[date] = None) -> Optional[date]:
-        dialog = QDialog(self)
-        dialog.setWindowTitle(title)
-        dialog.setMinimumWidth(380)
-        d_layout = QVBoxLayout(dialog)
-        d_layout.setSpacing(12)
-
-        lbl = QLabel(message)
-        lbl.setWordWrap(True)
-        lbl.setStyleSheet("font-size: 12px; color: #1E293B;")
-        d_layout.addWidget(lbl)
-
-        date_edit = QDateEdit()
-        date_edit.setCalendarPopup(True)
-        date_edit.setDisplayFormat("dd/MM/yyyy")
-        d_val = default_date or date.today()
-        date_edit.setDate(QDate(d_val.year, d_val.month, d_val.day))
-        date_edit.setStyleSheet("font-size: 13px; font-weight: bold; padding: 6px; border: 1px solid #FFB6C1; border-radius: 4px;")
-        d_layout.addWidget(date_edit)
-
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        btns.accepted.connect(dialog.accept)
-        btns.rejected.connect(dialog.reject)
-        d_layout.addWidget(btns)
-
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            qd = date_edit.date()
-            return date(qd.year(), qd.month(), qd.day())
-        return None
-
-    def _quick_load_inhouse(self) -> None:
-        fpath, _ = QFileDialog.getOpenFileName(
-            self, "Select In-House List Export",
-            "", "Spreadsheet Files (*.xlsx *.xls *.csv);;CSV Files (*.csv);;All Files (*.*)"
-        )
-        if not fpath:
-            return
-
-        file_dt, date_source = extract_inhouse_report_date(fpath)
-        processing_dt: Optional[date] = None
-
-        if file_dt:
-            if file_dt == date.today():
-                processing_dt = file_dt
-            else:
-                resp = QMessageBox.question(
-                    self,
-                    "In-House Report Date Detected",
-                    f"The file contains a report date of {file_dt.strftime('%d/%m/%Y')} (Source: {date_source}).\n\n"
-                    f"Today is {date.today().strftime('%d/%m/%Y')}.\n\n"
-                    f"Do you want to process this file for {file_dt.strftime('%d/%m/%Y')}?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
-                    QMessageBox.StandardButton.Yes
-                )
-                if resp == QMessageBox.StandardButton.Yes:
-                    processing_dt = file_dt
-                elif resp == QMessageBox.StandardButton.No:
-                    processing_dt = self._prompt_for_operational_date(
-                        "Set Operational Date",
-                        "Please select the operational date to assign to this in-house list:",
-                        default_date=date.today()
-                    )
-                    if processing_dt is None:
-                        return
-                else:
-                    return
-        else:
-            processing_dt = self._prompt_for_operational_date(
-                "Operational Date Required",
-                f"Could not automatically detect the report date inside:\n{os.path.basename(fpath)}\n\n"
-                f"Please specify the operational date for this In-House list:",
-                default_date=date.today()
-            )
-            if processing_dt is None:
-                return
-
-        try:
-            new_bookings = self.data_manager.parse_in_house_file(fpath)
-            if not new_bookings:
-                QMessageBox.warning(self, "Empty File", f"No valid bookings could be extracted from:\n{os.path.basename(fpath)}")
-                return
-
-            summary = self.data_manager.compare_and_update(new_bookings, processing_date=processing_dt)
-            self.refresh_stats(sync=True)
-            QMessageBox.information(
-                self, "In-House List Synchronized",
-                f"Successfully ingested {summary['total_in_house']} bookings for {summary['date']}!\n\n"
-                f"• In-House Active: {summary['total_in_house']}\n"
-                f"• Room Moves Detected: {len(summary.get('room_moves', []))}\n"
-                f"• Check-Ins Recorded: {len(summary.get('check_ins', []))}\n"
-                f"• Check-Outs Recorded: {len(summary.get('check_outs', []))}\n"
-                f"• Master State and Block metrics refreshed."
-            )
-        except Exception as e:
-            QMessageBox.critical(self, "Ingestion Error", f"Failed to ingest in-house file:\n{e}")
-
-    def _quick_refresh_blocks(self) -> None:
-        try:
-            res = self.data_manager.export_room_block_json_data()
-            self.refresh_stats(sync=True)
-            QMessageBox.information(
-                self, "Block Exports Refreshed",
-                f"Successfully refreshed {res.get('total_blocks_exported', 0)} room block JSON exports in PLOT directory."
-            )
-        except Exception as e:
-            QMessageBox.critical(self, "Export Failed", f"Error exporting room blocks:\n{e}")
-
-    def _open_output_folder(self, subfolder: Optional[str] = None, full_path: Optional[str] = None) -> None:
-        target = full_path or (os.path.join(OUTPUT_DIR, subfolder) if subfolder else OUTPUT_DIR)
-        os.makedirs(target, exist_ok=True)
-        try:
-            os.startfile(target)
-        except Exception as e:
-            QMessageBox.warning(self, "Cannot Open Folder", f"Could not open directory:\n{e}")
-
     def _count_documents(self) -> Dict[str, int]:
         offers_count = 0
         cakes_count = 0
@@ -1585,18 +1804,10 @@ class StatsWidget(QWidget):
                 cakes_count += len([f for f in os.listdir(p) if f.lower().endswith(('.xlsx', '.docx', '.pdf'))])
         return {"offers": offers_count, "cakes": cakes_count}
 
-    def _build_activity_log(self, meta: Dict[str, Any]) -> str:
-        lines = []
-        sync_date = meta.get("last_sync_date") or meta.get("last_processed_date")
-        if sync_date:
-            ts = str(meta.get("last_updated_at", "")).split(".")[0].replace("T", " ")
-            lines.append(f"• Last In-House Sync: {sync_date} at {ts} ({meta.get('total_bookings', 0)} bookings)")
-        else:
-            lines.append("• No In-House sync events recorded in state_metadata.json.")
-        return "\n".join(lines)
 
     def activate(self) -> None:
         """Called by app navigation when Stats option is selected."""
+        print(f"[StatsWidget] activate() invoked - total active canvas count: {StatsWidget._canvas_creation_count}")
         try:
             self.refresh_stats(sync=True)
         except Exception as e:

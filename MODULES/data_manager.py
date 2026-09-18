@@ -38,6 +38,7 @@ TODAYS_LIST_DIR = os.path.join(OUTPUT_DIR, "TODAYS_LIST")
 BOOKING_CALLS_DIR = os.path.join(BASE_DIR, "BOOKING CALLS")
 PLOT_DIR = os.path.join(BASE_DIR, "PLOT")
 HOTEL_DATASET_PATH = os.path.join(PLOT_DIR, "HotelDataSet.json")
+ROOMS_DIR = os.path.join(BASE_DIR, "ROOMS")
 
 # Standardized Target Directories inside DATABASE/
 HOTEL_STATE_DIR = os.path.join(DATABASE_DIR, "HOTEL STATE")
@@ -587,6 +588,110 @@ class InHouseDataManager:
         normalized = {k: self.normalize_booking_dict(k, v) for k, v in state.items()}
         save_and_archive_json(normalized, self.master_state_path)
 
+    # -------------------------------------------------------------------------
+    # Trace List Ingestion & Room Mapping Integration
+    # -------------------------------------------------------------------------
+    def scan_for_trace_files(self, search_dir: Optional[str] = None) -> List[str]:
+        """Scans DATABASE/ (or specified directory) to locate trace list export files."""
+        from MODULES.trace_analytics import scan_for_trace_files as _scan
+        return _scan(search_dir or DATABASE_DIR)
+
+    def parse_trace_file(self, file_path: str) -> List[Dict[str, Any]]:
+        """Parses a trace list file (.csv, .xlsx, .xls) and normalizes trace records."""
+        from MODULES.trace_analytics import parse_trace_file as _parse
+        return _parse(file_path)
+
+    def generate_room_json_mappings(
+        self,
+        trace_items: Optional[List[Dict[str, Any]]] = None,
+        file_path: Optional[str] = None,
+        rooms_dir: Optional[str] = None,
+        include_all_schema_rooms: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Generates or updates ROOMS/<room_number>.json mapping files idempotently.
+        """
+        from MODULES.trace_analytics import (
+            parse_trace_file as _parse,
+            generate_room_json_mappings as _gen,
+            scan_for_trace_files as _scan
+        )
+        if trace_items is None:
+            target_path = file_path
+            if not target_path:
+                detected = _scan(DATABASE_DIR)
+                target_path = detected[0] if detected else None
+            if not target_path:
+                return {"error": "No trace file specified or detected"}
+            trace_items = _parse(target_path)
+
+        target_rooms_dir = rooms_dir or ROOMS_DIR
+        return _gen(trace_items, rooms_dir=target_rooms_dir, include_all_schema_rooms=include_all_schema_rooms)
+
+    def get_trace_analytics_data(
+        self,
+        trace_items: Optional[List[Dict[str, Any]]] = None,
+        file_path: Optional[str] = None,
+        room_moves_path: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Computes statistical aggregations for the 10 Visual Analytics Charts and extended KPIs."""
+        from MODULES.trace_analytics import (
+            parse_trace_file as _parse,
+            compute_visual_analytics_data as _calc,
+            scan_for_trace_files as _scan
+        )
+        if trace_items is None:
+            target_path = file_path
+            if not target_path:
+                detected = _scan(DATABASE_DIR)
+                target_path = detected[0] if detected else None
+            if not target_path:
+                in_house_manifest = self.load_master_state()
+                return _calc([], in_house_manifest=in_house_manifest, hotel_dataset_path=HOTEL_DATASET_PATH, room_moves_path=room_moves_path or self.room_moves_path)
+            trace_items = _parse(target_path)
+
+        in_house_manifest = self.load_master_state()
+        return _calc(
+            trace_items,
+            in_house_manifest=in_house_manifest,
+            hotel_dataset_path=HOTEL_DATASET_PATH,
+            room_moves_path=room_moves_path or self.room_moves_path
+        )
+
+    def fuse_inhouse_and_traces(
+        self,
+        in_house_data: Optional[Dict[str, Any]] = None,
+        trace_items: Optional[List[Dict[str, Any]]] = None,
+        file_path: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Executes bidirectional synchronization and joint fusion of In-House list and Traces.
+        """
+        from MODULES.trace_analytics import (
+            fuse_inhouse_and_traces as _fuse,
+            parse_trace_file as _parse,
+            scan_for_trace_files as _scan
+        )
+        if in_house_data is None:
+            in_house_data = self.load_master_state()
+            if not in_house_data and os.path.exists(DATABASE_DIR):
+                in_house_files = [f for f in os.listdir(DATABASE_DIR) if "in_house" in f.lower() or "παραμένοντες" in f.lower()]
+                if in_house_files:
+                    in_house_data = self.parse_in_house_file(os.path.join(DATABASE_DIR, in_house_files[0]))
+
+        if trace_items is None:
+            target_path = file_path
+            if not target_path:
+                detected = _scan(DATABASE_DIR)
+                target_path = detected[0] if detected else None
+            if target_path and os.path.exists(target_path):
+                trace_items = _parse(target_path)
+            else:
+                trace_items = []
+
+        return _fuse(in_house_data or {}, trace_items or [], hotel_dataset_path=HOTEL_DATASET_PATH)
+
+
     def load_metadata(self) -> Dict[str, Any]:
         """Loads system metadata (last_sync_date, last_updated_at, total_bookings)."""
         target = self.state_meta_path
@@ -803,6 +908,8 @@ class InHouseDataManager:
                 continue
 
             cleaned_row = [str(cell).strip().strip('"\'') for cell in raw_row]
+            if cleaned_row and cleaned_row[0].startswith('\ufeff'):
+                cleaned_row[0] = cleaned_row[0].replace('\ufeff', '')
 
             if header is None:
                 is_header = any(

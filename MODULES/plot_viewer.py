@@ -718,11 +718,15 @@ class ResortGraphicsView(QGraphicsView):
             self.owner.update_detail_level()
 
     def wheelEvent(self, event):
-        delta = event.angleDelta().y()
-        if delta == 0:
-            return
-        self.zoom_by(self.zoom_factor if delta > 0 else 1.0 / self.zoom_factor)
-        event.accept()
+        # Require Ctrl key for zooming; otherwise forward wheel event for standard panning/scrolling
+        if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            delta = event.angleDelta().y()
+            if delta != 0:
+                self.zoom_by(self.zoom_factor if delta > 0 else 1.0 / self.zoom_factor)
+                event.accept()
+        else:
+            event.ignore()
+
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -1294,6 +1298,568 @@ class PlotGraphWindow(QMainWindow):
 
     def __getattr__(self, name):
         return getattr(self.viewer, name)
+
+
+# =============================================================================
+# TraceAnalyticsPlotEngine: Matplotlib Rendering Engine for 10 Visual Charts
+# =============================================================================
+
+class TraceAnalyticsPlotEngine:
+    """
+    Renders high-DPI, aesthetically styled Matplotlib charts for each of
+    the 10 operational analytics requirements in the Guest Relations Suite.
+    """
+
+    COLOR_PALETTE = [
+        "#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6",
+        "#EC4899", "#06B6D4", "#14B8A6", "#F97316", "#6366F1"
+    ]
+
+    @staticmethod
+    def _apply_axes_style(ax, title: str, xlabel: str = "", ylabel: str = ""):
+        """Applies a clean, modern aesthetic style to Matplotlib axes."""
+        ax.set_facecolor("#FFFFFF")
+        ax.set_title(title, fontsize=10, fontweight="bold", color="#1E293B", pad=8)
+        if xlabel:
+            ax.set_xlabel(xlabel, fontsize=8.5, fontweight="bold", color="#475569", labelpad=4)
+        if ylabel:
+            ax.set_ylabel(ylabel, fontsize=8.5, fontweight="bold", color="#475569", labelpad=4)
+        ax.tick_params(axis="both", which="major", labelsize=8, colors="#334155")
+        for spine in ["top", "right"]:
+            ax.spines[spine].set_visible(False)
+        for spine in ["left", "bottom"]:
+            ax.spines[spine].set_color("#CBD5E1")
+            ax.spines[spine].set_linewidth(0.8)
+        ax.grid(axis="y", linestyle="--", alpha=0.4, color="#E2E8F0")
+
+    @classmethod
+    def render_tour_operator_mix(cls, fig, data: Dict[str, Any]):
+        """Chart 1: Tour Operator / Market Mix (Pie / Donut or Bar)"""
+        fig.clear()
+        ax = fig.add_subplot(111)
+        mix = data.get("tour_operator_mix", [])
+
+        if not mix:
+            ax.text(0.5, 0.5, "No Tour Operator / Agency Data Available", ha="center", va="center", color="#94A3B8", fontsize=10)
+            ax.set_axis_off()
+            fig.tight_layout(pad=1.5)
+            return
+
+        # Use horizontal bar if more than 5 operators for clean scannability
+        operators = [m["operator"] for m in reversed(mix[:10])]
+        percentages = [m["percentage"] for m in reversed(mix[:10])]
+        counts = [m["count"] for m in reversed(mix[:10])]
+
+        y_pos = range(len(operators))
+        colors = (cls.COLOR_PALETTE * 2)[:len(operators)]
+        bars = ax.barh(y_pos, percentages, color=colors, height=0.6, edgecolor="#FFFFFF", linewidth=1.2)
+
+        cls._apply_axes_style(ax, "Market Mix & Tour Operator Share (%)", xlabel="Guest Share (%)")
+        ax.set_yticks(list(y_pos))
+        ax.set_yticklabels(operators, fontsize=8, fontweight="bold")
+        ax.set_xlim(0, max(percentages) * 1.25 if percentages else 100)
+
+        for bar, pct, cnt in zip(bars, percentages, counts):
+            w = bar.get_width()
+            ax.text(w + 1.0, bar.get_y() + bar.get_height() / 2.0, f"{pct:.1f}% ({cnt})",
+                    va="center", ha="left", fontsize=7.5, fontweight="bold", color="#1E293B")
+
+        fig.tight_layout(pad=1.5)
+
+    @classmethod
+    def render_length_of_stay(cls, fig, data: Dict[str, Any]):
+        """Chart 2: Length of Stay Distribution (1-3, 4-6, 7-9, 10-13, 14+ nights)"""
+        fig.clear()
+        ax = fig.add_subplot(111)
+        stay_bins = data.get("length_of_stay_dist", {})
+
+        categories = list(stay_bins.keys())
+        values = [stay_bins.get(c, 0) for c in categories]
+
+        colors = ["#38BDF8", "#3B82F6", "#1D4ED8", "#7C3AED", "#4C1D95"]
+        bars = ax.bar(categories, values, color=colors, width=0.55, edgecolor="#1E293B", linewidth=0.5)
+
+        cls._apply_axes_style(ax, "Length of Stay Distribution (Nights)", ylabel="Guest Count")
+        max_val = max(values) if values and max(values) > 0 else 10
+        ax.set_ylim(0, max_val * 1.25)
+        ax.grid(axis="y", linestyle="--", alpha=0.4, color="#E2E8F0")
+
+        for bar, val in zip(bars, values):
+            ax.text(bar.get_x() + bar.get_width() / 2.0, bar.get_height() + (max_val * 0.02),
+                    str(val), ha="center", va="bottom", fontsize=8.5, fontweight="bold", color="#1E293B")
+
+        fig.tight_layout(pad=1.5)
+
+    @classmethod
+    def render_room_type_upgrade_downgrade(cls, fig, data: Dict[str, Any]):
+        """Chart 3: Room Type Booked vs. Assigned (Upgrade/Downgrade Tracker)"""
+        fig.clear()
+        # Create dual-panel comparison: Left = Upgrade/Downgrade Balance, Right = Top Room Types Comparison
+        gs = fig.add_gridspec(1, 2, width_ratios=[1, 1.4])
+        ax1 = fig.add_subplot(gs[0])
+        ax2 = fig.add_subplot(gs[1])
+
+        info = data.get("room_type_upgrade_downgrade", {})
+        upgrades = info.get("upgrade", 0)
+        downgrades = info.get("downgrade", 0)
+        exact_match = info.get("exact_match", 0)
+
+        # Panel 1: Upgrade / Downgrade Balance Bar
+        balance_labels = ["Exact Match", "Upgrades", "Downgrades"]
+        balance_vals = [exact_match, upgrades, downgrades]
+        balance_colors = ["#10B981", "#3B82F6", "#EF4444"]
+
+        b_bars = ax1.bar(balance_labels, balance_vals, color=balance_colors, width=0.5, edgecolor="#1E293B", linewidth=0.5)
+        cls._apply_axes_style(ax1, "Upgrade / Downgrade Balance", ylabel="Reservations")
+        max_b = max(balance_vals) if max(balance_vals) > 0 else 5
+        ax1.set_ylim(0, max_b * 1.25)
+
+        for bar, v in zip(b_bars, balance_vals):
+            ax1.text(bar.get_x() + bar.get_width() / 2.0, bar.get_height() + (max_b * 0.02),
+                     str(v), ha="center", va="bottom", fontsize=8, fontweight="bold", color="#1E293B")
+
+        # Panel 2: Booked vs Assigned Grouped Bar
+        booked_counts = info.get("booked_counts", {})
+        assigned_counts = info.get("assigned_counts", {})
+        all_types = sorted(list(set(list(booked_counts.keys()) + list(assigned_counts.keys()))))[:5]
+
+        if all_types:
+            import numpy as np
+            indices = np.arange(len(all_types))
+            width = 0.35
+            b_vals = [booked_counts.get(t, 0) for t in all_types]
+            a_vals = [assigned_counts.get(t, 0) for t in all_types]
+
+            ax2.bar(indices - width/2, b_vals, width=width, label="Booked Type", color="#94A3B8", edgecolor="#475569", linewidth=0.5)
+            ax2.bar(indices + width/2, a_vals, width=width, label="Assigned Type", color="#4F46E5", edgecolor="#312E81", linewidth=0.5)
+
+            cls._apply_axes_style(ax2, "Room Category Discrepancy", ylabel="Count")
+            ax2.set_xticks(indices)
+            ax2.set_xticklabels(all_types, fontsize=7.5, fontweight="bold", rotation=20, ha="right")
+            ax2.legend(fontsize=7.5, loc="upper right", framealpha=0.9)
+            max_c = max(b_vals + a_vals) if (b_vals + a_vals) and max(b_vals + a_vals) > 0 else 5
+            ax2.set_ylim(0, max_c * 1.25)
+        else:
+            ax2.text(0.5, 0.5, "Standard Category Matches", ha="center", va="center", color="#94A3B8")
+            ax2.set_axis_off()
+
+        fig.tight_layout(pad=1.5)
+
+    @classmethod
+    def render_daily_arrivals_departures(cls, fig, data: Dict[str, Any]):
+        """Chart 4: Daily Arrivals & Departures Chronological Timeline"""
+        fig.clear()
+        ax = fig.add_subplot(111)
+        daily_moves = data.get("daily_arrivals_departures", [])
+
+        if not daily_moves:
+            ax.text(0.5, 0.5, "No Date Activity in Active Trace Window", ha="center", va="center", color="#94A3B8")
+            ax.set_axis_off()
+            fig.tight_layout(pad=1.5)
+            return
+
+        dates = [d["date"][5:] for d in daily_moves]  # MM-DD for clean spacing
+        arrivals = [d["arrivals"] for d in daily_moves]
+        departures = [d["departures"] for d in daily_moves]
+
+        import numpy as np
+        x = np.arange(len(dates))
+        width = 0.38
+
+        bar_arr = ax.bar(x - width/2, arrivals, width=width, label="Check-Ins / Arrivals", color="#2563EB", edgecolor="#1D4ED8", linewidth=0.6)
+        bar_dep = ax.bar(x + width/2, departures, width=width, label="Check-Outs / Departures", color="#D97706", edgecolor="#B45309", linewidth=0.6)
+
+        cls._apply_axes_style(ax, "Daily Arrivals (Check-Ins) & Departures (Check-Outs)", ylabel="Movement Count")
+        ax.set_xticks(x)
+        ax.set_xticklabels(dates, fontsize=7.5, fontweight="bold", rotation=30, ha="right")
+        ax.legend(fontsize=8, loc="upper right", framealpha=0.95)
+
+        max_val = max(arrivals + departures) if (arrivals + departures) and max(arrivals + departures) > 0 else 5
+        ax.set_ylim(0, max_val * 1.3)
+
+        for bar, val in zip(bar_arr, arrivals):
+            if val > 0:
+                ax.text(bar.get_x() + bar.get_width() / 2.0, val + (max_val * 0.02),
+                        str(val), ha="center", va="bottom", fontsize=7, fontweight="bold", color="#1D4ED8")
+        for bar, val in zip(bar_dep, departures):
+            if val > 0:
+                ax.text(bar.get_x() + bar.get_width() / 2.0, val + (max_val * 0.02),
+                        str(val), ha="center", va="bottom", fontsize=7, fontweight="bold", color="#B45309")
+
+        fig.tight_layout(pad=1.5)
+
+    @classmethod
+    def render_trace_category_breakdown(cls, fig, data: Dict[str, Any]):
+        """Chart 5: Trace Category Breakdown"""
+        fig.clear()
+        ax = fig.add_subplot(111)
+        cats = data.get("trace_category_breakdown", [])
+
+        if not cats:
+            ax.text(0.5, 0.5, "No Trace Categories Recorded", ha="center", va="center", color="#94A3B8")
+            ax.set_axis_off()
+            fig.tight_layout(pad=1.5)
+            return
+
+        cat_names = [c["category"] for c in reversed(cats)]
+        cat_counts = [c["count"] for c in reversed(cats)]
+
+        y_pos = range(len(cat_names))
+        colors = ["#4338CA", "#6366F1", "#059669", "#D97706", "#DC2626", "#BE185D"] * 2
+        bars = ax.barh(y_pos, cat_counts, color=colors[:len(cat_names)], height=0.55, edgecolor="#1E293B", linewidth=0.5)
+
+        cls._apply_axes_style(ax, "Primary Trace Categories Frequency", xlabel="Total Traces")
+        ax.set_yticks(list(y_pos))
+        ax.set_yticklabels(cat_names, fontsize=8, fontweight="bold")
+        max_c = max(cat_counts) if cat_counts else 5
+        ax.set_xlim(0, max_c * 1.25)
+
+        for bar, val in zip(bars, cat_counts):
+            ax.text(bar.get_width() + (max_c * 0.02), bar.get_y() + bar.get_height() / 2.0,
+                    str(val), va="center", ha="left", fontsize=8, fontweight="bold", color="#1E293B")
+
+        fig.tight_layout(pad=1.5)
+
+    @classmethod
+    def render_rcr_reason_tagging(cls, fig, data: Dict[str, Any]):
+        """Chart 6: Room Change Request Reason Tagging (Keyword Categorization)"""
+        fig.clear()
+        ax = fig.add_subplot(111)
+        tags = data.get("rcr_reason_tagging", [])
+
+        if not tags:
+            ax.text(0.5, 0.5, "No Room Change Requests Recorded", ha="center", va="center", color="#94A3B8")
+            ax.set_axis_off()
+            fig.tight_layout(pad=1.5)
+            return
+
+        tag_names = [t["reason"] for t in reversed(tags[:8])]
+        tag_counts = [t["count"] for t in reversed(tags[:8])]
+
+        y_pos = range(len(tag_names))
+        colors = ["#E11D48", "#EA580C", "#D97706", "#CA8A04", "#65A30D", "#0284C7", "#7C3AED", "#475569"]
+        bars = ax.barh(y_pos, tag_counts, color=colors[:len(tag_names)], height=0.55, edgecolor="#1E293B", linewidth=0.5)
+
+        cls._apply_axes_style(ax, "Room Change Request: Keyword Reason Tags", xlabel="Complaint / Request Count")
+        ax.set_yticks(list(y_pos))
+        ax.set_yticklabels(tag_names, fontsize=8, fontweight="bold")
+        max_t = max(tag_counts) if tag_counts else 5
+        ax.set_xlim(0, max_t * 1.25)
+
+        for bar, val in zip(bars, tag_counts):
+            ax.text(bar.get_width() + (max_t * 0.02), bar.get_y() + bar.get_height() / 2.0,
+                    str(val), va="center", ha="left", fontsize=8, fontweight="bold", color="#1E293B")
+
+        fig.tight_layout(pad=1.5)
+
+    @classmethod
+    def render_allergy_dietary_frequency(cls, fig, data: Dict[str, Any]):
+        """Chart 7: Allergy & Dietary Requirement Frequency"""
+        fig.clear()
+        ax = fig.add_subplot(111)
+        allergies = data.get("allergy_dietary_frequency", [])
+
+        if not allergies:
+            ax.text(0.5, 0.5, "No Dietary Alerts Recorded", ha="center", va="center", color="#94A3B8")
+            ax.set_axis_off()
+            fig.tight_layout(pad=1.5)
+            return
+
+        names = [a["allergen"] for a in allergies]
+        counts = [a["count"] for a in allergies]
+
+        colors = ["#D97706", "#2563EB", "#059669", "#DC2626", "#7C3AED", "#0D9488", "#CA8A04", "#64748B"]
+        bars = ax.bar(names, counts, color=colors[:len(names)], width=0.55, edgecolor="#1E293B", linewidth=0.5)
+
+        cls._apply_axes_style(ax, "Allergies & Dietary Requirement Frequencies", ylabel="Affected Guests")
+        max_cnt = max(counts) if counts else 5
+        ax.set_ylim(0, max_cnt * 1.3)
+        ax.set_xticks(range(len(names)))
+        ax.set_xticklabels(names, fontsize=7.5, fontweight="bold", rotation=25, ha="right")
+
+        for bar, val in zip(bars, counts):
+            ax.text(bar.get_x() + bar.get_width() / 2.0, val + (max_cnt * 0.02),
+                    str(val), ha="center", va="bottom", fontsize=8, fontweight="bold", color="#1E293B")
+
+        fig.tight_layout(pad=1.5)
+
+    @classmethod
+    def render_repeat_issue_rooms(cls, fig, data: Dict[str, Any]):
+        """Chart 8: Repeat-Issue Rooms (Occurrences >= 2)"""
+        fig.clear()
+        ax = fig.add_subplot(111)
+        repeat_rooms = data.get("repeat_issue_rooms", [])
+
+        if not repeat_rooms:
+            # Positive indicator when no rooms have repeat complaints
+            ax.text(0.5, 0.5, "[PASS] Clean Operational Slate:\nNo Rooms with Multiple Repeat Traces (>= 2)",
+                    ha="center", va="center", color="#059669", fontsize=11, fontweight="bold")
+            ax.set_axis_off()
+            fig.tight_layout(pad=1.5)
+            return
+
+        room_labels = [f"Room {r['room_number']}" for r in reversed(repeat_rooms[:8])]
+        counts = [r["total_traces"] for r in reversed(repeat_rooms[:8])]
+
+        y_pos = range(len(room_labels))
+        bars = ax.barh(y_pos, counts, color="#DC2626", height=0.55, edgecolor="#7F1D1D", linewidth=0.8)
+
+        cls._apply_axes_style(ax, "Ranked Repeat-Issue Rooms (Trace Frequency ≥ 2)", xlabel="Total Traces Logged")
+        ax.set_yticks(list(y_pos))
+        ax.set_yticklabels(room_labels, fontsize=8.5, fontweight="bold", color="#991B1B")
+        max_c = max(counts) if counts else 5
+        ax.set_xlim(0, max_c * 1.3)
+
+        for bar, r_info in zip(bars, reversed(repeat_rooms[:8])):
+            tags_str = ", ".join(r_info.get("top_tags", []))
+            annotation = f"{r_info['total_traces']} traces ({tags_str})" if tags_str else f"{r_info['total_traces']} traces"
+            ax.text(bar.get_width() + 0.1, bar.get_y() + bar.get_height() / 2.0,
+                    annotation, va="center", ha="left", fontsize=7.5, fontweight="bold", color="#1E293B")
+
+        fig.tight_layout(pad=1.5)
+
+    @classmethod
+    def render_trace_status_funnel(cls, fig, data: Dict[str, Any]):
+        """Chart 9: Trace Status Funnel (Category Stacked by Status)"""
+        fig.clear()
+        ax = fig.add_subplot(111)
+        funnel = data.get("trace_status_funnel", {})
+
+        categories = funnel.get("categories", [])
+        statuses = funnel.get("statuses", [])
+        status_data = funnel.get("data", {})
+
+        if not categories:
+            ax.text(0.5, 0.5, "No Status Funnel Records Available", ha="center", va="center", color="#94A3B8")
+            ax.set_axis_off()
+            fig.tight_layout(pad=1.5)
+            return
+
+        import numpy as np
+        x = np.arange(len(categories))
+        width = 0.55
+
+        # Standard status colors
+        status_colors = {
+            "Checked In": "#2563EB",
+            "Checked Out": "#94A3B8",
+            "Definite": "#059669",
+            "Resolved": "#10B981",
+            "Upgrade": "#7C3AED",
+            "Tentative": "#D97706"
+        }
+
+        bottoms = np.zeros(len(categories))
+        for st in statuses:
+            vals = np.array([status_data.get(cat, {}).get(st, 0) for cat in categories])
+            if np.sum(vals) > 0:
+                color = status_colors.get(st, "#64748B")
+                ax.bar(x, vals, width=width, bottom=bottoms, label=st, color=color, edgecolor="#FFFFFF", linewidth=0.8)
+                bottoms += vals
+
+        cls._apply_axes_style(ax, "Trace Status Lifecycle Funnel by Category", ylabel="Trace Count")
+        ax.set_xticks(x)
+        ax.set_xticklabels(categories, fontsize=7.5, fontweight="bold", rotation=25, ha="right")
+        ax.legend(fontsize=7.5, loc="upper right", framealpha=0.95)
+        max_tot = np.max(bottoms) if len(bottoms) and np.max(bottoms) > 0 else 5
+        ax.set_ylim(0, max_tot * 1.25)
+
+        for idx, tot in enumerate(bottoms):
+            if tot > 0:
+                ax.text(x[idx], tot + (max_tot * 0.02), f"{int(tot)}", ha="center", va="bottom",
+                        fontsize=7.5, fontweight="bold", color="#1E293B")
+
+        fig.tight_layout(pad=1.5)
+
+    @classmethod
+    def render_block_floor_density(cls, fig, data: Dict[str, Any]):
+        """Chart 10: Block / Floor Complaint Density Heatmap Matrix"""
+        fig.clear()
+        ax = fig.add_subplot(111)
+        matrix_info = data.get("block_floor_complaint_density", {})
+
+        blocks = matrix_info.get("blocks", [])
+        floors = ["Ground Floor (0)", "1st Floor (1)", "2nd Floor (2)"]
+        rows = matrix_info.get("matrix", [])
+
+        if not blocks or not rows:
+            ax.text(0.5, 0.5, "No Zone Complaint Density Data", ha="center", va="center", color="#94A3B8")
+            ax.set_axis_off()
+            fig.tight_layout(pad=1.5)
+            return
+
+        import numpy as np
+        heatmap_matrix = np.zeros((len(floors), len(blocks)))
+        for col_idx, row in enumerate(rows):
+            heatmap_matrix[0, col_idx] = row.get("floor_0", 0)
+            heatmap_matrix[1, col_idx] = row.get("floor_1", 0)
+            heatmap_matrix[2, col_idx] = row.get("floor_2", 0)
+
+        # Invert Y so Ground Floor is at the bottom
+        heatmap_matrix = np.flipud(heatmap_matrix)
+        display_floors = list(reversed(floors))
+
+        cax = ax.imshow(heatmap_matrix, cmap="YlOrRd", aspect="auto")
+
+        # Colorbar
+        cbar = fig.colorbar(cax, ax=ax, orientation="vertical", pad=0.03, shrink=0.85)
+        cbar.ax.tick_params(labelsize=7)
+        cbar.set_label("Complaints / Traces", fontsize=7.5, fontweight="bold", color="#475569")
+
+        ax.set_xticks(range(len(blocks)))
+        ax.set_xticklabels([f"Block {b}" for b in blocks], fontsize=8, fontweight="bold")
+        ax.set_yticks(range(len(display_floors)))
+        ax.set_yticklabels(display_floors, fontsize=8, fontweight="bold")
+
+        cls._apply_axes_style(ax, "Resort Spatial Complaint Density (Block vs. Floor)", xlabel="Resort Accommodation Block")
+
+        # Annotate each heatmap cell with count
+        max_density = np.max(heatmap_matrix)
+        for i in range(len(display_floors)):
+            for j in range(len(blocks)):
+                val = int(heatmap_matrix[i, j])
+                text_color = "white" if val > (max_density * 0.6) and val > 0 else "#1E293B"
+                ax.text(j, i, str(val), ha="center", va="center",
+                        color=text_color, fontsize=8.5, fontweight="bold")
+
+        fig.tight_layout(pad=1.5)
+
+    @classmethod
+    def render_trace_subcategory_breakdown(cls, fig, data: Dict[str, Any]):
+        """Chart 11: Trace Sub-Category Breakdown (Informational vs Operational Work)"""
+        fig.clear()
+        ax = fig.add_subplot(111)
+        subcats = data.get("trace_subcategory_breakdown", [])
+
+        if not subcats or sum(s.get("count", 0) for s in subcats) == 0:
+            ax.text(0.5, 0.5, "No Informational / General Trace Entries Recorded", ha="center", va="center", color="#94A3B8", fontsize=10)
+            ax.set_axis_off()
+            fig.tight_layout(pad=1.5)
+            return
+
+        names = [s["subcategory"] for s in reversed(subcats)]
+        counts = [s["count"] for s in reversed(subcats)]
+        total = sum(counts)
+
+        y_pos = range(len(names))
+        colors = ["#2563EB", "#059669", "#D97706", "#DC2626", "#7C3AED", "#0891B2", "#10B981", "#64748B"]
+        bars = ax.barh(y_pos, counts, color=colors[:len(names)], height=0.55, edgecolor="#1E293B", linewidth=0.5)
+
+        cls._apply_axes_style(ax, "Trace Sub-Category Breakdown (Operational vs. Informational)", xlabel="Log / Request Count")
+        ax.set_yticks(list(y_pos))
+        ax.set_yticklabels(names, fontsize=8, fontweight="bold")
+        max_c = max(counts) if counts else 5
+        ax.set_xlim(0, max_c * 1.3)
+
+        for bar, val in zip(bars, counts):
+            pct = (val / total * 100.0) if total > 0 else 0.0
+            ax.text(bar.get_width() + (max_c * 0.02), bar.get_y() + bar.get_height() / 2.0,
+                    f"{val} ({pct:.1f}%)", va="center", ha="left", fontsize=7.5, fontweight="bold", color="#1E293B")
+
+        fig.tight_layout(pad=1.5)
+
+    @classmethod
+    def render_feedback_sentiment_split(cls, fig, data: Dict[str, Any]):
+        """Chart 12: Guest Feedback Sentiment Split (Voice of the Guest)"""
+        fig.clear()
+        sentiment_data = data.get("feedback_sentiment_split", {})
+        total_fb = sentiment_data.get("total_feedback", 0)
+
+        if total_fb == 0:
+            ax = fig.add_subplot(111)
+            ax.text(0.5, 0.5, "No Guest Feedback Records in Active Dataset", ha="center", va="center", color="#94A3B8", fontsize=10)
+            ax.set_axis_off()
+            fig.tight_layout(pad=1.5)
+            return
+
+        # Dual panel: Left = Donut breakdown, Right = Horizontal volume bar
+        gs = fig.add_gridspec(1, 2, width_ratios=[1, 1.2])
+        ax1 = fig.add_subplot(gs[0])
+        ax2 = fig.add_subplot(gs[1])
+
+        labels = ["Positive", "Neutral", "Negative"]
+        counts = [
+            sentiment_data.get("positive", 0),
+            sentiment_data.get("neutral", 0),
+            sentiment_data.get("negative", 0)
+        ]
+        colors = ["#10B981", "#94A3B8", "#EF4444"]
+
+        # Filter out 0 for pie
+        pie_labels = []
+        pie_counts = []
+        pie_colors = []
+        for l, c, clr in zip(labels, counts, colors):
+            if c > 0:
+                pie_labels.append(l)
+                pie_counts.append(c)
+                pie_colors.append(clr)
+
+        wedges, texts, autotexts = ax1.pie(
+            pie_counts,
+            labels=pie_labels,
+            autopct="%1.1f%%",
+            colors=pie_colors,
+            startangle=140,
+            textprops={"fontsize": 8, "fontweight": "bold", "color": "#1E293B"},
+            wedgeprops={"edgecolor": "#FFFFFF", "linewidth": 1.5, "width": 0.55}
+        )
+        for at in autotexts:
+            at.set_fontsize(8)
+            at.set_fontweight("bold")
+            at.set_color("#FFFFFF")
+        ax1.set_title("Sentiment Share (%)", fontsize=9.5, fontweight="bold", color="#1E293B", pad=6)
+
+        # Right: Bar breakdown with counts
+        y_pos = range(len(labels))
+        bars = ax2.barh(list(reversed(y_pos)), list(reversed(counts)), color=list(reversed(colors)), height=0.5, edgecolor="#1E293B", linewidth=0.5)
+        cls._apply_axes_style(ax2, "Feedback Volume by Sentiment", xlabel="Guest Feedback Count")
+        ax2.set_yticks(list(reversed(y_pos)))
+        ax2.set_yticklabels(list(reversed(labels)), fontsize=8, fontweight="bold")
+        max_v = max(counts) if max(counts) > 0 else 5
+        ax2.set_xlim(0, max_v * 1.3)
+
+        for bar, val in zip(bars, reversed(counts)):
+            pct = (val / total_fb * 100.0) if total_fb > 0 else 0.0
+            ax2.text(bar.get_width() + (max_v * 0.02), bar.get_y() + bar.get_height() / 2.0,
+                     f"{val} ({pct:.1f}%)", va="center", ha="left", fontsize=7.5, fontweight="bold", color="#1E293B")
+
+        fig.tight_layout(pad=1.5)
+
+    @classmethod
+    def render_rcr_resolution_rate(cls, fig, data: Dict[str, Any]):
+        """RCR Resolution Rate Breakdown (Resolved vs Pending vs Attempted vs Stayed)"""
+        fig.clear()
+        ax = fig.add_subplot(111)
+        rcr_data = data.get("rcr_analytics", {})
+        breakdown = rcr_data.get("resolution_breakdown", {})
+        total_rcr = rcr_data.get("total_move_requests", 0)
+
+        if total_rcr == 0:
+            ax.text(0.5, 0.5, "No Room Change Requests Recorded", ha="center", va="center", color="#94A3B8", fontsize=10)
+            ax.set_axis_off()
+            fig.tight_layout(pad=1.5)
+            return
+
+        statuses = ["Resolved / Moved", "Decided to Stay", "Attempted / No Answer", "Pending / Unresolved"]
+        counts = [breakdown.get(s, 0) for s in statuses]
+        colors = ["#10B981", "#6366F1", "#F59E0B", "#EF4444"]
+
+        # Horizontal stacked bar
+        left = 0
+        for s, cnt, clr in zip(statuses, counts, colors):
+            pct = (cnt / total_rcr * 100.0) if total_rcr > 0 else 0.0
+            if cnt > 0:
+                ax.barh([0], [pct], left=[left], color=clr, label=f"{s}: {cnt} ({pct:.1f}%)", height=0.45, edgecolor="#FFFFFF", linewidth=1.2)
+                if pct > 6:
+                    ax.text(left + pct / 2.0, 0, f"{pct:.0f}%", ha="center", va="center", color="#FFFFFF", fontsize=8, fontweight="bold")
+                left += pct
+
+        cls._apply_axes_style(ax, "Room Change Request Resolution Velocity (%)", xlabel="Percentage of Total RCRs (%)")
+        ax.set_yticks([])
+        ax.set_xlim(0, 100)
+        ax.legend(fontsize=7.5, loc="upper right", bbox_to_anchor=(1.0, 1.35), ncol=2, framealpha=0.95)
+        fig.tight_layout(pad=1.5)
 
 
 if __name__ == "__main__":
