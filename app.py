@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QPoint
 
 from MODULES.data_manager import ensure_workspace_directories
-from MODULES.plot_viewer import PlotGraphWindow
+from MODULES.plot_viewer import PlotGraphWindow, PlotViewerWidget
 
 from OPTIONS._shared_widgets import Sidebar, WorkspaceViewerDialog
 from OPTIONS.configuration_option import ConfigurationWidget
@@ -36,6 +36,7 @@ __all__ = [
     "StatsWidget",
     "ResortStatsDialog",
     "WorkspaceViewerDialog",
+    "PlotViewerWidget",
 ]
 
 
@@ -74,6 +75,7 @@ class GuestRelationApp(QMainWindow):
 
         self.config_widget = ConfigurationWidget()
         self.stats_widget = StatsWidget()
+        self.plot_widget = PlotViewerWidget()
         self.moves_widget = MovesWidget()
         self.todo_widget = TodoWidget(log_callback=log_cb)
         self.offers_widget = OffersOptionWidget(log_callback=log_cb)
@@ -86,6 +88,7 @@ class GuestRelationApp(QMainWindow):
         self.option_widgets = {
             "CONFIG":      self.config_widget,
             "STATS":       self.stats_widget,
+            "PLOT":        self.plot_widget,
             "MOVES":       self.moves_widget,
             "TODO":        self.todo_widget,
             "OFFERS":      self.offers_widget,
@@ -224,12 +227,14 @@ class GuestRelationApp(QMainWindow):
 
         self.action_stats = self.popout_menu.addAction("Stats")
         self.action_plot = self.popout_menu.addAction("Plot")
+        self.action_moves = self.popout_menu.addAction("Room Moves")
         self.action_config = self.popout_menu.addAction("Configuration")
         self.action_system_data = self.popout_menu.addAction("System Data Records")
         self.action_logs = self.popout_menu.addAction("Logs")
 
         self.action_stats.triggered.connect(lambda: self.select_category("STATS"))
-        self.action_plot.triggered.connect(self.open_plot_window)
+        self.action_plot.triggered.connect(lambda: self.select_category("PLOT"))
+        self.action_moves.triggered.connect(lambda: self.select_category("MOVES"))
         self.action_config.triggered.connect(lambda: self.select_category("CONFIG"))
         self.action_system_data.triggered.connect(lambda: self.select_category("SYSTEM_DATA"))
         self.action_logs.triggered.connect(lambda: self.select_category("LOGS"))
@@ -266,7 +271,7 @@ class GuestRelationApp(QMainWindow):
         # Register all option widgets into the stacked widget
         # -----------------------------------------------------------------
         # Order matters for index compatibility, but we use references not indices
-        for key in ["CONFIG", "STATS", "MOVES", "TODO", "OFFERS",
+        for key in ["CONFIG", "STATS", "PLOT", "MOVES", "TODO", "OFFERS",
                      "ALLERGIES", "CAKE", "BOOKING", "SYSTEM_DATA", "LOGS"]:
             self.stacked_content.addWidget(self.option_widgets[key])
 
@@ -284,6 +289,7 @@ class GuestRelationApp(QMainWindow):
         # -----------------------------------------------------------------
         self.config_widget.data_updated.connect(self.stats_widget.refresh_stats)
         self.config_widget.data_updated.connect(self.booking_widget.refresh_calls)
+        self.config_widget.data_updated.connect(self.plot_widget.refresh_plot)
         self.booking_widget.feedback_submitted.connect(self.handle_booking_feedback_to_todo)
 
         main_layout.addWidget(self.sidebar)
@@ -314,13 +320,8 @@ class GuestRelationApp(QMainWindow):
         self.popout_menu.popup(QPoint(target_x, target_y))
 
     def open_plot_window(self) -> None:
-        if self.plot_window is None or not self.plot_window.isVisible():
-            self.plot_window = PlotGraphWindow()
-            self.plot_window.show()
-        else:
-            self.plot_window.raise_()
-            self.plot_window.activateWindow()
-        self.add_log("All Activity", "Resort Node Graph Visualization (Plot) window opened.", "INFO")
+        self.select_category("PLOT")
+        self.add_log("All Activity", "Resort Node Graph Visualization (Plot) activated.", "INFO")
 
     def collapse_all_submenus(self) -> None:
         self.offers_submenu.hide()
@@ -369,7 +370,7 @@ class GuestRelationApp(QMainWindow):
             btn.style().unpolish(btn)
             btn.style().polish(btn)
 
-        is_popout_active = self.active_category in ["STATS", "CONFIG", "SYSTEM_DATA", "LOGS"]
+        is_popout_active = self.active_category in ["STATS", "PLOT", "MOVES", "CONFIG", "SYSTEM_DATA", "LOGS"]
         self.sidebar.btn_hamburger.setProperty("active", is_popout_active)
         self.sidebar.btn_hamburger.style().unpolish(self.sidebar.btn_hamburger)
         self.sidebar.btn_hamburger.style().polish(self.sidebar.btn_hamburger)

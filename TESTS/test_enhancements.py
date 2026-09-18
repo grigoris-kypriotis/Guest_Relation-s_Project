@@ -26,8 +26,10 @@ from MODULES.data_manager import (
     MASTER_STATE_PATH,
     STATE_META_PATH
 )
-from MODULES.plot_viewer import PlotGraphWindow, ResortNodeItem, REAL_MAP_COORDINATES
+from MODULES.plot_viewer import PlotGraphWindow, PlotViewerWidget, ResortNodeItem, REAL_MAP_COORDINATES
 from app import ConfigurationWidget, StatsWidget, GuestRelationApp, WorkspaceViewerDialog, ResortStatsDialog
+from OPTIONS.configuration_option import load_app_settings, save_app_settings, APP_SETTINGS_PATH
+from OPTIONS.system_data_option import SystemDataOptionWidget
 
 
 class TestEnhancementsSuite(unittest.TestCase):
@@ -250,9 +252,10 @@ class TestEnhancementsSuite(unittest.TestCase):
     def test_resort_stats_dialog_and_stats_widget_tabs(self):
         # StatsWidget structure
         stats_w = StatsWidget()
-        self.assertEqual(stats_w.tabs.count(), 2)
+        self.assertEqual(stats_w.tabs.count(), 3)
         self.assertEqual(stats_w.tabs.tabText(0), "📈 Visual Analytics Suite")
         self.assertEqual(stats_w.tabs.tabText(1), "📋 Guest Manifest Table")
+        self.assertEqual(stats_w.tabs.tabText(2), "⚡ Quick Actions")
         self.assertIsNotNone(stats_w.analytics_scroll)
         self.assertIsNotNone(stats_w.card_capacity)
         self.assertIsNotNone(stats_w.card_occ)
@@ -313,6 +316,267 @@ class TestEnhancementsSuite(unittest.TestCase):
         viewer_dlg.close()
         parent_widget.close()
 
+    # -------------------------------------------------------------------------
+    # 12. Plot Workspace Embedding & Room Moves Menu Tests
+    # -------------------------------------------------------------------------
+    def test_plot_viewer_widget_and_workspace_embedding(self):
+        viewer = PlotViewerWidget()
+        self.assertIsNotNone(viewer)
+        self.assertEqual(len(viewer.node_items), 44)
+        viewer.activate()
+        viewer.refresh_plot()
+        viewer.close()
+
+        app_win = GuestRelationApp()
+        self.assertIn("PLOT", app_win.option_widgets)
+        self.assertIs(app_win.option_widgets["PLOT"], app_win.plot_widget)
+        
+        # Test switching to PLOT embeds in stacked_content without opening separate window
+        app_win.select_category("PLOT")
+        self.assertIs(app_win.stacked_content.currentWidget(), app_win.plot_widget)
+        self.assertTrue(app_win.sidebar.btn_hamburger.property("active"))
+        app_win.close()
+
+    def test_room_moves_menu_action_and_navigation(self):
+        app_win = GuestRelationApp()
+        self.assertIsNotNone(app_win.action_moves)
+        self.assertEqual(app_win.action_moves.text(), "Room Moves")
+        
+        # Triggering the action switches stacked_content to moves_widget
+        app_win.action_moves.trigger()
+        self.assertIs(app_win.stacked_content.currentWidget(), app_win.moves_widget)
+        self.assertTrue(app_win.sidebar.btn_hamburger.property("active"))
+        app_win.close()
+
+    # -------------------------------------------------------------------------
+    # 13. Configuration Settings Persistence & Signal Emission Tests
+    # -------------------------------------------------------------------------
+    def test_configuration_settings_persistence_and_signals(self):
+        cfg_w = ConfigurationWidget()
+        cfg_w.spin_beach_rooms.setValue(670)
+        
+        signal_emitted = []
+        cfg_w.data_updated.connect(lambda: signal_emitted.append(True))
+        
+        cfg_w.save_configuration()
+        self.assertTrue(os.path.exists(APP_SETTINGS_PATH))
+        settings = load_app_settings()
+        self.assertEqual(settings["properties"]["sandy_beach_rooms"], 670)
+        self.assertTrue(len(signal_emitted) > 0)
+        cfg_w.close()
+
+    # -------------------------------------------------------------------------
+    # 14. StatsWidget Vertical Stacking, Progress Bar & Async Data Fetching
+    # -------------------------------------------------------------------------
+    def test_stats_widget_vertical_stacking_and_async_data(self):
+        stats_w = StatsWidget()
+        self.assertIsNotNone(stats_w.progress_occ)
+        self.assertEqual(stats_w.progress_occ.maximum(), 100)
+        
+        # Test background data fetching method directly
+        data = stats_w._fetch_all_stats_data()
+        self.assertIn("total_physical_rooms", data)
+        self.assertIn("block_percentages", data)
+        self.assertIn("target_blocks", data)
+        self.assertIn("occ_pct", data)
+        self.assertEqual(len(data["target_blocks"]), 16)
+        
+        # Apply data and verify UI update
+        stats_w._apply_stats_data(data)
+        self.assertIn("%", stats_w.card_occ.lbl_main.text())
+        self.assertIn("Rooms", stats_w.card_capacity.lbl_main.text())
+        self.assertIsNotNone(stats_w.figure)
+        stats_w.close()
+
+    # -------------------------------------------------------------------------
+    # 15. Plot Viewer Node Click Inspection & Rich Attributes
+    # -------------------------------------------------------------------------
+    def test_plot_viewer_node_click_inspection(self):
+        viewer = PlotViewerWidget()
+        viewer.resize(1000, 800)
+        viewer.show()
+        
+        # Click node 1 (Block 1100)
+        node_1 = viewer.node_items[1]
+        viewer.open_node_inspector(node_1.node_data, node_id=1)
+        self.assertIsNotNone(viewer.active_popup)
+        self.assertEqual(viewer.active_popup.node_name, "BLOCK 1100")
+        self.assertEqual(viewer.selected_id, 1)
+        self.assertTrue(node_1.is_selected_node)
+        
+        viewer._close_popup()
+        self.assertIsNone(viewer.active_popup)
+        self.assertFalse(node_1.is_selected_node)
+        viewer.close()
+
+    # -------------------------------------------------------------------------
+    # 16. Canonical English Header Normalization
+    # -------------------------------------------------------------------------
+    def test_canonical_english_header_normalization(self):
+        # Greek input booking
+        greek_booking = {
+            "Δωμάτιο": "1111",
+            "Πελάτες": ["John Doe", "Jane Doe"],
+            "Άφιξη": "18/9/2026",
+            "Αναχώρηση": "25/9/2026",
+            "Τύπος Δωματίου": "F1G",
+            "Χρεωστικός Τύπος Δωματίου": "F1G",
+            "Χρεώστης": "TUI FRANCE",
+            "Αγορά": "FRANCE",
+            "Σύν. Ατόμων": "2",
+            "Αρ. Παιδ": "0",
+            "Τύπος Γεύματος": "All Inclusive"
+        }
+        norm_greek = InHouseDataManager.normalize_booking_dict("1001", greek_booking)
+        self.assertEqual(norm_greek["Room"], "1111")
+        self.assertEqual(norm_greek["Δωμάτιο"], "1111")
+        self.assertEqual(norm_greek["Guests"], ["John Doe", "Jane Doe"])
+        self.assertEqual(norm_greek["Arrival"], "18/9/2026")
+        self.assertEqual(norm_greek["Departure"], "25/9/2026")
+        self.assertEqual(norm_greek["Room Type"], "F1G")
+        self.assertEqual(norm_greek["Agency"], "TUI FRANCE")
+        self.assertEqual(norm_greek["Meal Plan"], "All Inclusive")
+
+        # English input booking
+        english_booking = {
+            "Room": "2105",
+            "Guests": ["Alice Smith"],
+            "Arrival": "18/9/2026",
+            "Departure": "22/9/2026",
+            "Room Type": "D1G",
+            "Agency": "BOOKING.COM",
+            "Market": "UK",
+            "Adults": "1",
+            "Children": "0"
+        }
+        norm_eng = InHouseDataManager.normalize_booking_dict("1002", english_booking)
+        self.assertEqual(norm_eng["Room"], "2105")
+        self.assertEqual(norm_eng["Δωμάτιο"], "2105")
+        self.assertEqual(norm_eng["Guests"], ["Alice Smith"])
+        self.assertEqual(norm_eng["Πελάτες"], ["Alice Smith"])
+        self.assertEqual(norm_eng["Arrival"], "18/9/2026")
+        self.assertEqual(norm_eng["Departure"], "22/9/2026")
+        self.assertEqual(norm_eng["Room Type"], "D1G")
+        self.assertEqual(norm_eng["Agency"], "BOOKING.COM")
+
+    # -------------------------------------------------------------------------
+    # 17. SystemDataOptionWidget Filter Controls & Live Arrivals
+    # -------------------------------------------------------------------------
+    def test_system_data_option_filtering_and_arrivals(self):
+        # Seed test state to ensure hermetic execution regardless of purge tests
+        today_s = date.today().strftime("%d/%m/%Y")
+        test_state = {
+            "1001": {
+                "Room": "1111",
+                "Guests": ["John Doe"],
+                "Arrival": today_s,
+                "Departure": "25/09/2026",
+                "Room Type": "F1G",
+                "Agency": "SUNWEB"
+            },
+            "1002": {
+                "Room": "2105",
+                "Guests": ["Jane Smith"],
+                "Arrival": today_s,
+                "Departure": "26/09/2026",
+                "Room Type": "D1G",
+                "Agency": "TUI"
+            }
+        }
+        self.dm.save_master_state(test_state)
+        self.dm.set_last_sync_date(date.today())
+
+        sys_w = SystemDataOptionWidget()
+        self.assertIsNotNone(sys_w.cmb_room_filter)
+        self.assertIsNotNone(sys_w.txt_filter)
+        self.assertIsNotNone(sys_w.btn_filter)
+        self.assertIsNotNone(sys_w.btn_clear_filter)
+
+        # Check English table headers
+        master_headers = [sys_w.table_master.horizontalHeaderItem(c).text() for c in range(sys_w.table_master.columnCount())]
+        self.assertIn("Room", master_headers)
+        self.assertIn("Booking ID", master_headers)
+        self.assertIn("Guest Name(s)", master_headers)
+        self.assertIn("Arrival", master_headers)
+        self.assertIn("Departure", master_headers)
+
+        arrivals_headers = [sys_w.table_beach_arrivals.horizontalHeaderItem(c).text() for c in range(sys_w.table_beach_arrivals.columnCount())]
+        self.assertIn("Room", arrivals_headers)
+        self.assertIn("Guest Name(s)", arrivals_headers)
+        self.assertIn("Arrival", arrivals_headers)
+
+        # Verify arrivals have records
+        self.assertGreater(sys_w.table_beach_arrivals.rowCount(), 0)
+
+        # Test filter by room block
+        total_rows = sys_w.table_master.rowCount()
+        self.assertGreater(total_rows, 0)
+        sys_w.cmb_room_filter.setCurrentText("Block 1100s")
+        sys_w._apply_filter()
+        hidden_count = sum(1 for r in range(total_rows) if sys_w.table_master.isRowHidden(r))
+        self.assertGreater(hidden_count, 0)
+
+        # Test clear filter
+        sys_w._clear_filter()
+        all_visible = all(not sys_w.table_master.isRowHidden(r) for r in range(total_rows))
+        self.assertTrue(all_visible)
+
+        # Test text search filter
+        sys_w.txt_filter.setText("SUNWEB")
+        sys_w._apply_filter()
+        sys_w._clear_filter()
+        sys_w.close()
+
+    # -------------------------------------------------------------------------
+    # 18. StatsWidget Scrollable Visual Dashboard & Block Meters
+    # -------------------------------------------------------------------------
+    def test_stats_widget_scrollable_dashboard_and_block_meters(self):
+        # Seed test state for hermetic execution
+        test_state = {
+            "1001": {
+                "Room": "1111",
+                "Guests": ["John Doe"],
+                "Arrival": "18/9/2026",
+                "Departure": "25/9/2026",
+                "Room Type": "F1G",
+                "Agency": "SUNWEB"
+            }
+        }
+        self.dm.save_master_state(test_state)
+        self.dm.set_last_sync_date(date.today())
+
+        stats_w = StatsWidget()
+        # Verify scroll area
+        self.assertIsNotNone(stats_w.analytics_scroll)
+        self.assertTrue(stats_w.analytics_scroll.widgetResizable())
+
+        # Verify Block visual meter cards
+        self.assertGreaterEqual(len(stats_w.block_card_widgets), 16)
+        self.assertIn("BLOCK 1100", stats_w.block_card_widgets)
+        card_1100 = stats_w.block_card_widgets["BLOCK 1100"]
+        self.assertIsNotNone(card_1100.pbar)
+        self.assertIsNotNone(card_1100.lbl_pct)
+
+        # Verify manifest table inside Stats
+        self.assertIsNotNone(stats_w.table_inhouse)
+        self.assertGreater(stats_w.table_inhouse.rowCount(), 0)
+        manifest_headers = [stats_w.table_inhouse.horizontalHeaderItem(c).text() for c in range(stats_w.table_inhouse.columnCount())]
+        self.assertEqual(manifest_headers[0], "Room")
+        self.assertEqual(manifest_headers[1], "Booking ID")
+        self.assertEqual(manifest_headers[2], "Guest Name(s)")
+
+        # Verify search filter on manifest table
+        stats_w.txt_search.setText("1111")
+        stats_w._filter_table()
+        visible_1111 = [r for r in range(stats_w.table_inhouse.rowCount()) if not stats_w.table_inhouse.isRowHidden(r)]
+        self.assertGreater(len(visible_1111), 0)
+
+        stats_w.txt_search.clear()
+        stats_w._filter_table()
+        stats_w.close()
+
 
 if __name__ == "__main__":
     unittest.main()
+
+

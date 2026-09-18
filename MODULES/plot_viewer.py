@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
     QGraphicsItem, QGraphicsPathItem, QComboBox, QFrame,
     QScrollArea, QTextEdit, QApplication, QSizePolicy, QLineEdit
 )
-from PyQt6.QtCore import Qt, QRectF, QPointF, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QRectF, QPointF, QPoint, QRect, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QBrush, QColor, QPen, QFont, QPainter, QRadialGradient,
     QPainterPath, QCursor, QFontMetrics
@@ -646,15 +646,25 @@ class NodePopup(QDialog):
         dlg.exec()
 
     # ------------------------------------------------------------- placement
-    def popup_at(self, global_pos: QPointF):
+    def popup_at(self, global_pos: Any = None):
         """Show the popup near the cursor, clamped to the visible screen."""
-        screen = QApplication.screenAt(global_pos.toPoint()) or QApplication.primaryScreen()
-        avail = screen.availableGeometry()
+        if hasattr(global_pos, "toPoint"):
+            pt = global_pos.toPoint()
+        elif isinstance(global_pos, QPoint):
+            pt = global_pos
+        else:
+            pt = QCursor.pos()
 
-        x = int(global_pos.x()) + 16
-        y = int(global_pos.y()) + 12
+        screen = QApplication.screenAt(pt) or QApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen else QRect(0, 0, 1920, 1080)
+
+        gx = pt.x() if hasattr(pt, "x") else int(pt)
+        gy = pt.y() if hasattr(pt, "y") else int(pt)
+
+        x = gx + 16
+        y = gy + 12
         if x + self.width() > avail.right():
-            x = int(global_pos.x()) - self.width() - 16
+            x = gx - self.width() - 16
         if y + self.height() > avail.bottom():
             y = avail.bottom() - self.height() - 8
         x = max(avail.left() + 4, x)
@@ -662,6 +672,8 @@ class NodePopup(QDialog):
 
         self.move(x, y)
         self.show()
+        self.raise_()
+        self.activateWindow()
 
     def closeEvent(self, event):
         self.closed.emit()
@@ -712,20 +724,48 @@ class ResortGraphicsView(QGraphicsView):
         self.zoom_by(self.zoom_factor if delta > 0 else 1.0 / self.zoom_factor)
         event.accept()
 
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            item = self.itemAt(event.pos())
+            node_item = item if isinstance(item, ResortNodeItem) else None
+            curr = item
+            while curr and not node_item:
+                if isinstance(curr, ResortNodeItem):
+                    node_item = curr
+                    break
+                curr = curr.parentItem() if hasattr(curr, "parentItem") else None
+
+            self._pressed_node = node_item
+            self._press_pos = event.pos()
+            if node_item:
+                self.setDragMode(QGraphicsView.DragMode.NoDrag)
+            else:
+                self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton:
+            if getattr(self, "_pressed_node", None) is not None:
+                delta = (event.pos() - getattr(self, "_press_pos", event.pos())).manhattanLength()
+                if delta < 6:
+                    node = self._pressed_node
+                    global_pt = self.mapToGlobal(event.pos())
+                    if hasattr(self.owner, "open_node_inspector"):
+                        self.owner.open_node_inspector(node.node_data, global_pt, node.node_id)
+                self._pressed_node = None
+            self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+
 
 # =============================================================================
-# Main window
+# Plot Viewer Widget (Embeddable in QStackedWidget)
 # =============================================================================
 
-class PlotGraphWindow(QMainWindow):
-    """Interactive connected-node graph of the Sandy Beach resort map."""
+class PlotViewerWidget(QWidget):
+    """Interactive connected-node graph of the Sandy Beach resort map as an embeddable QWidget."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Resort Node Graph — Sandy Beach")
-        self.resize(1280, 850)
-        self.setStyleSheet("QMainWindow { background-color: #F8F9FA; }")
-
         self.nodes_data: List[Dict[str, Any]] = []
         self.node_items: Dict[int, ResortNodeItem] = {}
         self.edge_items: List[QGraphicsPathItem] = []
@@ -742,7 +782,7 @@ class PlotGraphWindow(QMainWindow):
     def _load_dataset(self):
         path = Path(HOTEL_DATASET_PATH)
         if not path.exists():
-            print(f"[PlotGraphWindow] Dataset not found: {path}")
+            print(f"[PlotViewerWidget] Dataset not found: {path}")
             return
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -755,14 +795,12 @@ class PlotGraphWindow(QMainWindow):
                         break
             self.nodes_data = data if isinstance(data, list) else []
         except Exception as e:
-            print(f"[PlotGraphWindow] Error loading dataset: {e}")
+            print(f"[PlotViewerWidget] Error loading dataset: {e}")
             self.nodes_data = []
 
     # -------------------------------------------------------------------- ui
     def _init_ui(self):
-        central = QWidget()
-        self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 8)
         layout.setSpacing(8)
 
@@ -1137,6 +1175,17 @@ class PlotGraphWindow(QMainWindow):
         self.view.resetTransform()
         self._fit_to_view()
 
+    def activate(self):
+        """Called when this option is selected from the workspace menu."""
+        QTimer.singleShot(60, self._fit_to_view)
+
+    def refresh_plot(self):
+        """Reload dataset and refresh graph nodes and edges."""
+        self._load_dataset()
+        self._build_scene()
+        cur_filter = self.combo_filter.currentText() if hasattr(self, "combo_filter") else FILTER_ROOMS
+        self._apply_filter(cur_filter)
+
     def showEvent(self, event):
         super().showEvent(event)
         QTimer.singleShot(60, self._fit_to_view)
@@ -1151,8 +1200,105 @@ class PlotGraphWindow(QMainWindow):
         super().closeEvent(event)
 
 
+# =============================================================================
+# Standalone Main Window (Backward-Compatible Wrapper)
+# =============================================================================
+
+class PlotGraphWindow(QMainWindow):
+    """Interactive connected-node graph of the Sandy Beach resort map (standalone window)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Resort Node Graph — Sandy Beach")
+        self.resize(1280, 850)
+        self.setStyleSheet("QMainWindow { background-color: #F8F9FA; }")
+
+        self.viewer = PlotViewerWidget(self)
+        self.setCentralWidget(self.viewer)
+
+    @property
+    def node_items(self) -> Dict[int, ResortNodeItem]:
+        return self.viewer.node_items
+
+    @property
+    def nodes_data(self) -> List[Dict[str, Any]]:
+        return self.viewer.nodes_data
+
+    @property
+    def edge_items(self) -> List[QGraphicsPathItem]:
+        return self.viewer.edge_items
+
+    @property
+    def active_popup(self) -> Optional[NodePopup]:
+        return self.viewer.active_popup
+
+    @active_popup.setter
+    def active_popup(self, val: Optional[NodePopup]):
+        self.viewer.active_popup = val
+
+    @property
+    def selected_id(self) -> Optional[int]:
+        return self.viewer.selected_id
+
+    @selected_id.setter
+    def selected_id(self, val: Optional[int]):
+        self.viewer.selected_id = val
+
+    @property
+    def user_zoomed(self) -> bool:
+        return self.viewer.user_zoomed
+
+    @user_zoomed.setter
+    def user_zoomed(self, val: bool):
+        self.viewer.user_zoomed = val
+
+    @property
+    def scene(self) -> QGraphicsScene:
+        return self.viewer.scene
+
+    @property
+    def view(self) -> ResortGraphicsView:
+        return self.viewer.view
+
+    @property
+    def lbl_status(self) -> QLabel:
+        return self.viewer.lbl_status
+
+    @property
+    def txt_search(self) -> QLineEdit:
+        return self.viewer.txt_search
+
+    def _search_nodes(self, query: str):
+        return self.viewer._search_nodes(query)
+
+    def _on_node_clicked(self, node_data: Dict[str, Any]):
+        return self.viewer._on_node_clicked(node_data)
+
+    def open_node_inspector(self, node_data: Dict[str, Any],
+                            global_pos: Optional[QPointF] = None,
+                            node_id: Optional[int] = None):
+        return self.viewer.open_node_inspector(node_data, global_pos, node_id)
+
+    def _fit_to_view(self):
+        return self.viewer._fit_to_view()
+
+    def _reset_view(self):
+        return self.viewer._reset_view()
+
+    def refresh_plot(self):
+        return self.viewer.refresh_plot()
+
+    def closeEvent(self, event):
+        self.viewer._close_popup()
+        super().closeEvent(event)
+
+    def __getattr__(self, name):
+        return getattr(self.viewer, name)
+
+
 if __name__ == "__main__":
     app = QApplication.instance() or QApplication(sys.argv)
     w = PlotGraphWindow()
     w.show()
     sys.exit(app.exec())
+

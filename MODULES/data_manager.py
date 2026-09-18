@@ -365,12 +365,176 @@ class InHouseDataManager:
       - Enforces Gatekeeper sequential in-house synchronization.
     """
 
-    BOOKING_ID_KEYS = ["Αρ.", "Αρ", "Booking ID", "Reservation ID", "Res ID", "Αριθμός Κράτησης"]
-    ROOM_KEYS = ["Δωμάτιο", "Room", "Room No", "Room Number", "Δωμ."]
-    GUEST_NAME_KEYS = ["Πελάτης", "Guest", "Guest Name", "Όνομα Πελάτη"]
-    ARRIVAL_KEYS = ["Άφιξη", "Arrival", "Arr Date"]
-    DEPARTURE_KEYS = ["Αναχώρηση", "Departure", "Dep Date"]
+    CANONICAL_HEADER_MAP = {
+        # Room
+        "δωμάτιο": "Room",
+        "δωματιο": "Room",
+        "δωμ.": "Room",
+        "δωμ": "Room",
+        "room": "Room",
+        "room no": "Room",
+        "room no.": "Room",
+        "room number": "Room",
+        "rm": "Room",
+        # Booking ID
+        "αρ.": "Booking ID",
+        "αρ": "Booking ID",
+        "αριθμός κράτησης": "Booking ID",
+        "αριθμος κρατησης": "Booking ID",
+        "booking id": "Booking ID",
+        "booking no": "Booking ID",
+        "reservation id": "Booking ID",
+        "res id": "Booking ID",
+        "res no": "Booking ID",
+        # Guests
+        "πελάτης": "Guests",
+        "πελατης": "Guests",
+        "πελάτες": "Guests",
+        "πελατες": "Guests",
+        "όνομα πελάτη": "Guests",
+        "ονομα πελατη": "Guests",
+        "guest": "Guests",
+        "guests": "Guests",
+        "guest name": "Guests",
+        "guest names": "Guests",
+        # Arrival
+        "άφιξη": "Arrival",
+        "αφιξη": "Arrival",
+        "arrival": "Arrival",
+        "arr date": "Arrival",
+        "arr": "Arrival",
+        "arr.": "Arrival",
+        # Departure
+        "αναχώρηση": "Departure",
+        "αναχωρηση": "Departure",
+        "departure": "Departure",
+        "dep date": "Departure",
+        "dep": "Departure",
+        "dep.": "Departure",
+        # Room Type
+        "τύπος δωματίου": "Room Type",
+        "τυπος δωματιου": "Room Type",
+        "τύπος δωμ": "Room Type",
+        "τυπος δωμ": "Room Type",
+        "τύπος δωμ.": "Room Type",
+        "room type": "Room Type",
+        "room cat": "Room Type",
+        "room category": "Room Type",
+        # Booked Room Type
+        "χρεωστικός τύπος δωματίου": "Booked Room Type",
+        "χρεωστικος τυπος δωματιου": "Booked Room Type",
+        "κρατηθείς τύπος": "Booked Room Type",
+        "κρατηθεις τυπος": "Booked Room Type",
+        "booked room type": "Booked Room Type",
+        "booked type": "Booked Room Type",
+        # Agency / Debtor
+        "χρεώστης": "Agency",
+        "χρεωστης": "Agency",
+        "agency": "Agency",
+        "debtor": "Agency",
+        "travel agency": "Agency",
+        "tour operator": "Agency",
+        # Market
+        "αγορά": "Market",
+        "αγορα": "Market",
+        "market": "Market",
+        "market segment": "Market",
+        # Meal Plan / Board
+        "τύπος γεύματος": "Meal Plan",
+        "τυπος γευματος": "Meal Plan",
+        "meal plan": "Meal Plan",
+        "meal": "Meal Plan",
+        "board": "Meal Plan",
+        "board basis": "Meal Plan",
+        # Adults
+        "σύν. ατόμων": "Adults",
+        "συν. ατομων": "Adults",
+        "αρ. ενηλ": "Adults",
+        "αρ. ενηλ.": "Adults",
+        "ενήλικες": "Adults",
+        "ενηλικες": "Adults",
+        "adults": "Adults",
+        "ad": "Adults",
+        # Children
+        "αρ. παιδ": "Children",
+        "αρ. παιδ.": "Children",
+        "παιδιά": "Children",
+        "παιδια": "Children",
+        "children": "Children",
+        "ch": "Children",
+        # Pricelist
+        "τιμοκατάλογος": "Pricelist",
+        "τιμοκαταλογος": "Pricelist",
+        "pricelist": "Pricelist",
+    }
+
+    BOOKING_ID_KEYS = ["Αρ.", "Αρ", "Booking ID", "Reservation ID", "Res ID", "Αριθμός Κράτησης", "Booking No"]
+    ROOM_KEYS = ["Δωμάτιο", "Room", "Room No", "Room Number", "Δωμ.", "Rm"]
+    GUEST_NAME_KEYS = ["Πελάτης", "Guest", "Guest Name", "Guests", "Όνομα Πελάτη", "Πελάτες"]
+    ARRIVAL_KEYS = ["Άφιξη", "Arrival", "Arr Date", "Arr."]
+    DEPARTURE_KEYS = ["Αναχώρηση", "Departure", "Dep Date", "Dep."]
     EXCLUDED_COLUMNS = ["τύπος γεύματος", "meal plan", "meal", "γεύμα"]
+
+    @classmethod
+    def normalize_booking_dict(cls, booking_id: str, b: Dict[str, Any]) -> Dict[str, Any]:
+        """Ensures both English (primary canonical) and Greek (backward-compatible alias) keys exist."""
+        res = dict(b)
+        room = str(res.get("Room") or res.get("Δωμάτιο") or res.get("room") or "").strip()
+        res["Room"] = room
+        res["Δωμάτιο"] = room
+
+        guests = res.get("Guests") or res.get("Πελάτες") or res.get("guests") or []
+        if not isinstance(guests, list):
+            guests = [str(guests)] if guests else []
+        res["Guests"] = guests
+        res["Πελάτες"] = guests
+
+        arrival = str(res.get("Arrival") or res.get("Άφιξη") or res.get("arrival") or "").strip()
+        res["Arrival"] = arrival
+        res["Άφιξη"] = arrival
+
+        departure = str(res.get("Departure") or res.get("Αναχώρηση") or res.get("departure") or "").strip()
+        res["Departure"] = departure
+        res["Αναχώρηση"] = departure
+
+        b_id = str(res.get("Booking ID") or res.get("Αρ.") or res.get("booking_id") or booking_id).strip()
+        res["Booking ID"] = b_id
+        res["Αρ."] = b_id
+
+        rtype = str(res.get("Room Type") or res.get("Τύπος Δωματίου") or res.get("Τύπος Δωμ") or res.get("room_type") or "Standard").strip()
+        res["Room Type"] = rtype
+        res["Τύπος Δωματίου"] = rtype
+        res["Τύπος Δωμ"] = rtype
+
+        booked_rtype = str(res.get("Booked Room Type") or res.get("Χρεωστικός Τύπος Δωματίου") or res.get("Κρατηθείς Τύπος") or rtype).strip()
+        res["Booked Room Type"] = booked_rtype
+        res["Χρεωστικός Τύπος Δωματίου"] = booked_rtype
+        res["Κρατηθείς Τύπος"] = booked_rtype
+
+        agency = str(res.get("Agency") or res.get("Χρεώστης") or res.get("agency") or "Direct").strip()
+        res["Agency"] = agency
+        res["Χρεώστης"] = agency
+
+        market = str(res.get("Market") or res.get("Αγορά") or res.get("market") or agency).strip()
+        res["Market"] = market
+        res["Αγορά"] = market
+
+        adults = str(res.get("Adults") or res.get("Σύν. Ατόμων") or res.get("Αρ. Ενηλ") or res.get("adults") or "1").strip()
+        res["Adults"] = adults
+        res["Σύν. Ατόμων"] = adults
+        res["Αρ. Ενηλ"] = adults
+
+        children = str(res.get("Children") or res.get("Αρ. Παιδ") or res.get("children") or "0").strip()
+        res["Children"] = children
+        res["Αρ. Παιδ"] = children
+
+        meal = res.get("Meal Plan") or res.get("Τύπος Γεύματος") or res.get("meal_plan")
+        if meal:
+            m_str = str(meal).strip()
+            res["Meal Plan"] = m_str
+            res["Τύπος Γεύματος"] = m_str
+
+        return res
 
     def __init__(
         self,
@@ -393,7 +557,7 @@ class InHouseDataManager:
     # In-House State Persistence (HOTEL STATE/master_state.json)
     # -------------------------------------------------------------------------
     def load_master_state(self) -> Dict[str, Dict[str, Any]]:
-        """Loads master_state.json from DATABASE/HOTEL STATE/master_state.json."""
+        """Loads master_state.json and automatically normalizes entries with canonical English keys."""
         target = self.master_state_path
         if not os.path.exists(target):
             return {}
@@ -402,14 +566,26 @@ class InHouseDataManager:
                 data = json.load(f)
                 if not isinstance(data, dict):
                     return {}
-                return {k: v for k, v in data.items() if not k.startswith("_") and isinstance(v, dict)}
+                return {
+                    k: self.normalize_booking_dict(k, v)
+                    for k, v in data.items()
+                    if not k.startswith("_") and isinstance(v, dict)
+                }
         except Exception as e:
             print(f"[InHouseDataManager] Error loading master state: {e}")
             return {}
 
+    def normalize_master_state(self) -> int:
+        """Persists normalized English and Greek keys to master_state.json."""
+        state = self.load_master_state()
+        if state:
+            self.save_master_state(state)
+        return len(state)
+
     def save_master_state(self, state: Dict[str, Dict[str, Any]]):
         """Atomically saves the active in-house guests to DATABASE/HOTEL STATE/master_state.json."""
-        save_and_archive_json(state, self.master_state_path)
+        normalized = {k: self.normalize_booking_dict(k, v) for k, v in state.items()}
+        save_and_archive_json(normalized, self.master_state_path)
 
     def load_metadata(self) -> Dict[str, Any]:
         """Loads system metadata (last_sync_date, last_updated_at, total_bookings)."""
@@ -684,7 +860,7 @@ class InHouseDataManager:
                 if guest_name:
                     break
 
-            # Prepare fields for JSON, omitting "Τύπος Γεύματος" and guest col
+            # Prepare fields for JSON
             if booking_id not in bookings:
                 booking_entry: Dict[str, Any] = {}
                 for col, val in row_dict.items():
@@ -695,15 +871,31 @@ class InHouseDataManager:
                         continue
                     if any(col_clean.lower() == alias.lower() for alias in self.BOOKING_ID_KEYS):
                         continue
+                    # Canonicalize header name to English
+                    canon_name = self.CANONICAL_HEADER_MAP.get(col_clean.lower(), col_clean)
+                    booking_entry[canon_name] = val
                     booking_entry[col_clean] = val
 
+                booking_entry["Guests"] = []
                 booking_entry["Πελάτες"] = []
                 bookings[booking_id] = booking_entry
 
-            if guest_name and guest_name not in bookings[booking_id]["Πελάτες"]:
-                bookings[booking_id]["Πελάτες"].append(guest_name)
+            if guest_name:
+                if "Guests" not in bookings[booking_id]:
+                    bookings[booking_id]["Guests"] = []
+                if "Πελάτες" not in bookings[booking_id]:
+                    bookings[booking_id]["Πελάτες"] = []
+                if guest_name not in bookings[booking_id]["Guests"]:
+                    bookings[booking_id]["Guests"].append(guest_name)
+                if guest_name not in bookings[booking_id]["Πελάτες"]:
+                    bookings[booking_id]["Πελάτες"].append(guest_name)
 
-        return bookings
+        # Standardize all bookings so both canonical English and Greek keys exist
+        normalized_bookings: Dict[str, Dict[str, Any]] = {}
+        for b_id, b_data in bookings.items():
+            normalized_bookings[b_id] = self.normalize_booking_dict(b_id, b_data)
+
+        return normalized_bookings
 
     def parse_in_house_csv(self, file_path: str) -> Dict[str, Dict[str, Any]]:
         """
@@ -885,20 +1077,24 @@ class InHouseDataManager:
 
         # 1. Compare new bookings with current state
         for booking_id, new_data in new_bookings.items():
-            new_room = str(new_data.get("Δωμάτιο", "")).strip()
+            new_room = str(new_data.get("Room") or new_data.get("Δωμάτιο", "")).strip()
 
             if booking_id in current_state:
                 old_data = current_state[booking_id]
-                old_room = str(old_data.get("Δωμάτιο", "")).strip()
+                old_room = str(old_data.get("Room") or old_data.get("Δωμάτιο", "")).strip()
 
                 if old_room and new_room and old_room != new_room:
+                    guests = new_data.get("Guests") or new_data.get("Πελάτες", [])
+                    arr = str(new_data.get("Arrival") or new_data.get("Άφιξη", "")).strip()
+                    dep = str(new_data.get("Departure") or new_data.get("Αναχώρηση", "")).strip()
                     move_info = {
                         "booking_id": booking_id,
-                        "guests": new_data.get("Πελάτες", []),
+                        "guests": guests,
+                        "Πελάτες": guests,
                         "old_room": old_room,
                         "new_room": new_room,
-                        "arrival": new_data.get("Άφιξη", ""),
-                        "departure": new_data.get("Αναχώρηση", ""),
+                        "arrival": arr,
+                        "departure": dep,
                         "date": date_str,
                         "timestamp": datetime.now().isoformat()
                     }
@@ -906,20 +1102,23 @@ class InHouseDataManager:
                 else:
                     unchanged_count += 1
             else:
+                guests = new_data.get("Guests") or new_data.get("Πελάτες", [])
+                arr = str(new_data.get("Arrival") or new_data.get("Άφιξη", "")).strip()
+                dep = str(new_data.get("Departure") or new_data.get("Αναχώρηση", "")).strip()
                 check_in_info = {
                     "booking_id": booking_id,
-                    "guests": new_data.get("Πελάτες", []),
+                    "guests": guests,
+                    "Πελάτες": guests,
                     "room": new_room,
-                    "arrival": new_data.get("Άφιξη", ""),
-                    "departure": new_data.get("Αναχώρηση", ""),
+                    "Room": new_room,
+                    "Δωμάτιο": new_room,
+                    "arrival": arr,
+                    "departure": dep,
                     "date": date_str
                 }
                 check_ins.append(check_in_info)
 
         # 2. Room Merge Detection & Exclusion Filter
-        # A room merge occurs if:
-        # a) Multiple candidate moves share the same new_room originating from different old_rooms.
-        # b) Or multiple bookings are consolidated into one room today where bookings came from different rooms yesterday.
         merged_room_numbers = set()
 
         # Check a: multiple candidate moves targeting the same new_room with different old_rooms
@@ -934,7 +1133,7 @@ class InHouseDataManager:
         # Check b: multiple bookings in new_bookings now share the same new_room
         new_room_to_all_bookings: Dict[str, List[str]] = {}
         for b_id, b_data in new_bookings.items():
-            rm = str(b_data.get("Δωμάτιο", "")).strip()
+            rm = str(b_data.get("Room") or b_data.get("Δωμάτιο", "")).strip()
             if rm:
                 new_room_to_all_bookings.setdefault(rm, []).append(b_id)
 
@@ -944,7 +1143,7 @@ class InHouseDataManager:
                 moved_in = False
                 for b_id in b_ids:
                     if b_id in current_state:
-                        prev_rm = str(current_state[b_id].get("Δωμάτιο", "")).strip()
+                        prev_rm = str(current_state[b_id].get("Room") or current_state[b_id].get("Δωμάτιο", "")).strip()
                         if prev_rm:
                             yesterday_rooms.add(prev_rm)
                             if prev_rm != nr:
@@ -965,12 +1164,18 @@ class InHouseDataManager:
         # 3. Detect Check-outs
         for booking_id, old_data in current_state.items():
             if booking_id not in new_bookings:
+                guests = old_data.get("Guests") or old_data.get("Πελάτες", [])
+                room = str(old_data.get("Room") or old_data.get("Δωμάτιο", "")).strip()
+                dep = str(old_data.get("Departure") or old_data.get("Αναχώρηση", "")).strip()
                 check_out_info = {
                     "booking_id": booking_id,
                     "property": DEFAULT_PROPERTY,
-                    "guests": old_data.get("Πελάτες", []),
-                    "room": old_data.get("Δωμάτιο", ""),
-                    "departure": old_data.get("Αναχώρηση", ""),
+                    "guests": guests,
+                    "Πελάτες": guests,
+                    "room": room,
+                    "Room": room,
+                    "Δωμάτιο": room,
+                    "departure": dep,
                     "checkout_date": date_str,
                     "archived_at": datetime.now().isoformat()
                 }
@@ -985,6 +1190,57 @@ class InHouseDataManager:
             self.export_room_block_json_data()
         except Exception as exp_err:
             print(f"[InHouseDataManager] Warning during auto room block export: {exp_err}")
+
+        # 4.2 Auto-populate Today's Arrivals from day arrivals or check-ins
+        day_arrivals = {}
+        for b_id, b_data in new_bookings.items():
+            arr_val = str(b_data.get("Arrival") or b_data.get("Άφιξη", "")).strip()
+            is_arr_today = False
+            if arr_val:
+                parts = arr_val.split("/")
+                if len(parts) == 3:
+                    try:
+                        d, m, y = int(parts[0]), int(parts[1]), int(parts[2])
+                        if y < 100:
+                            y += 2000
+                        if (d, m, y) == (processing_date.day, processing_date.month, processing_date.year):
+                            is_arr_today = True
+                    except Exception:
+                        pass
+                if not is_arr_today and (arr_val == date_str or arr_val == processing_date.strftime("%Y-%m-%d")):
+                    is_arr_today = True
+
+            if is_arr_today:
+                day_arrivals[b_id] = {
+                    "room": str(b_data.get("Room") or b_data.get("Δωμάτιο", "")).strip(),
+                    "Room": str(b_data.get("Room") or b_data.get("Δωμάτιο", "")).strip(),
+                    "guests": b_data.get("Guests") or b_data.get("Πελάτες", []),
+                    "adults": str(b_data.get("Adults") or b_data.get("Σύν. Ατόμων", "1")),
+                    "children": str(b_data.get("Children") or b_data.get("Αρ. Παιδ", "0")),
+                    "arrival": arr_val,
+                    "departure": str(b_data.get("Departure") or b_data.get("Αναχώρηση", "")),
+                    "agency": str(b_data.get("Agency") or b_data.get("Χρεώστης", "")),
+                    "room_type": str(b_data.get("Room Type") or b_data.get("Τύπος Δωματίου", ""))
+                }
+
+        if day_arrivals:
+            self.save_arrivals_state(day_arrivals)
+        elif check_ins:
+            ci_arrivals = {
+                ci["booking_id"]: {
+                    "room": ci["room"],
+                    "Room": ci["room"],
+                    "guests": ci["guests"],
+                    "adults": "1",
+                    "children": "0",
+                    "arrival": ci["arrival"],
+                    "departure": ci["departure"],
+                    "agency": "Direct",
+                    "room_type": "Standard"
+                }
+                for ci in check_ins
+            }
+            self.save_arrivals_state(ci_arrivals)
 
         # 5. Record Check-outs to History
         if check_outs:
@@ -1340,7 +1596,7 @@ def extract_inhouse_report_date(file_path: Union[str, Path]) -> Tuple[Optional[d
     ext = p.suffix.lower()
 
     if ext == ".csv":
-        enc, _ = InHouseDataManager._detect_encoding_and_delimiter(str(p))
+        enc, delim = InHouseDataManager._detect_encoding_and_delimiter(str(p))
         try:
             with open(p, "r", encoding=enc, errors="replace") as f:
                 lines = [l.strip() for l in f if l.strip()]
@@ -1352,7 +1608,7 @@ def extract_inhouse_report_date(file_path: Union[str, Path]) -> Tuple[Optional[d
             m_dt = re.search(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b", line)
             if m_dt:
                 is_meta = any(k in line.lower() for k in ["page", "σελίδα", "totals", "hotel", "print", "εκτύπωση", "report", "λίστα"])
-                if is_meta or len(line.split(";")) <= 5 or len(line.split(",")) <= 5:
+                if is_meta or len(line.split(delim)) <= 5:
                     try:
                         d_val = int(m_dt.group(1))
                         m_val = int(m_dt.group(2))
@@ -1364,6 +1620,17 @@ def extract_inhouse_report_date(file_path: Union[str, Path]) -> Tuple[Optional[d
                         break
                     except Exception:
                         pass
+        if not found_date:
+            for line in reversed(candidates):
+                m_dt = re.search(r"\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b", line)
+                if m_dt:
+                    is_meta = any(k in line.lower() for k in ["page", "σελίδα", "totals", "hotel", "print", "εκτύπωση", "report", "λίστα"])
+                    if is_meta or len(line.split(delim)) <= 5:
+                        try:
+                            found_date = date(int(m_dt.group(1)), int(m_dt.group(2)), int(m_dt.group(3)))
+                            break
+                        except Exception:
+                            pass
 
     elif ext == ".xlsx":
         try:
@@ -1381,7 +1648,11 @@ def extract_inhouse_report_date(file_path: Union[str, Path]) -> Tuple[Optional[d
             wb.close()
 
             for row in rows_sample:
-                for c in row:
+                non_empty = [c for c in row if c is not None and str(c).strip() != ""]
+                is_meta = any(any(k in str(c).lower() for k in ["page", "σελίδα", "totals", "hotel", "print", "εκτύπωση", "report", "λίστα", "date", "ημερομηνία"]) for c in non_empty)
+                if not is_meta and len(non_empty) > 5:
+                    continue
+                for c in non_empty:
                     if isinstance(c, datetime):
                         found_date = c.date()
                         found_time_str = c.strftime("%H:%M:%S")
@@ -1397,6 +1668,13 @@ def extract_inhouse_report_date(file_path: Union[str, Path]) -> Tuple[Optional[d
                                 break
                             except Exception:
                                 pass
+                        m_dt2 = re.search(r"\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b", c)
+                        if m_dt2:
+                            try:
+                                found_date = date(int(m_dt2.group(1)), int(m_dt2.group(2)), int(m_dt2.group(3)))
+                                break
+                            except Exception:
+                                pass
                 if found_date:
                     break
         except Exception as err:
@@ -1408,6 +1686,10 @@ def extract_inhouse_report_date(file_path: Union[str, Path]) -> Tuple[Optional[d
             wb = xlrd.open_workbook(str(p))
             ws = wb.sheet_by_index(0)
             for r in range(min(ws.nrows, 100)):
+                row_vals = [ws.cell(r, c).value for c in range(ws.ncols) if str(ws.cell(r, c).value).strip() != ""]
+                is_meta = any(any(k in str(v).lower() for k in ["page", "σελίδα", "totals", "hotel", "print", "εκτύπωση", "report", "λίστα", "date", "ημερομηνία"]) for v in row_vals)
+                if not is_meta and len(row_vals) > 5:
+                    continue
                 for c in range(ws.ncols):
                     cell = ws.cell(r, c)
                     if cell.ctype == xlrd.XL_CELL_DATE:
@@ -1423,6 +1705,13 @@ def extract_inhouse_report_date(file_path: Union[str, Path]) -> Tuple[Optional[d
                         if m_dt:
                             try:
                                 found_date = date(int(m_dt.group(3)), int(m_dt.group(2)), int(m_dt.group(1)))
+                                break
+                            except Exception:
+                                pass
+                        m_dt2 = re.search(r"\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b", cell.value)
+                        if m_dt2:
+                            try:
+                                found_date = date(int(m_dt2.group(1)), int(m_dt2.group(2)), int(m_dt2.group(3)))
                                 break
                             except Exception:
                                 pass
