@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import pyqtSignal
 
 from MODULES.data_manager import OUTPUT_DIR, resolve_template_path
+from MODULES.common.fb_email_recipients import TO_RECIPIENTS, CC_RECIPIENTS
 from OPTIONS._shared_widgets import OfficeViewer
 
 
@@ -131,20 +132,6 @@ def parse_cake_memo_docx(docx_path: str) -> Dict[str, str]:
 
 def generate_cake_memo_outlook_payload(docx_path: str, memo_data: Dict[str, str]) -> dict:
     """Generates an Outlook draft payload with the specified recipients, subject, and formatted HTML body."""
-    to_recipients = (
-        "Executive Chef Sandy Beach <chef.sandybeach@rizosresorts.gr>; "
-        "headchef.sandybeach@rizosresorts.gr; "
-        "F&B Manager Sandy Beach <gabriela.stere@rizosresorts.gr>; "
-        "assistfb.sandybeach@rizosresorts.gr; "
-        "assistfb2.sandybeach@rizosresorts <assistfb2.sandybeach@rizosresorts.gr>;"
-    )
-
-    cc_recipients = (
-        "Operation Manager <Mariela.Tsvetkova@rizosresorts.gr>; "
-        "Rooms Division Manager - Sandy Beach <harrys.palikiras@rizosresorts.gr>; "
-        "Front Office Manager Sandy Beach <fom.sandy@rizosresorts.gr>; "
-        "Guest Relations Sandy Beach <guest.sandybeach@rizosresorts.gr>;"
-    )
 
     room_number = memo_data["room_number"]
     cake_date = memo_data["cake_date_display"]
@@ -169,8 +156,8 @@ def generate_cake_memo_outlook_payload(docx_path: str, memo_data: Dict[str, str]
         "room_number": room_number,
         "is_service_trace": True,
         "data": {
-            "To": to_recipients,
-            "CC": cc_recipients,
+            "To": TO_RECIPIENTS,
+            "CC": CC_RECIPIENTS,
             "Subject": subject,
             "HTMLBody": html_body,
             "Attachment": docx_path

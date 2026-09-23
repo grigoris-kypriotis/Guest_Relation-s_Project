@@ -17,6 +17,7 @@ from MODULES.offers_module import (
     duplicate_for_update, resolve_todays_offer_file, ARRIVALS_FOLDER
 )
 from MODULES.offers.pipeline import get_last_record_failures
+from MODULES.common.fb_email_recipients import TO_RECIPIENTS, CC_RECIPIENTS
 from OPTIONS._shared_widgets import OfficeViewer
 from OPTIONS.configuration_option import load_app_settings
 
@@ -211,8 +212,8 @@ class OffersOptionWidget(QWidget):
             "subcategory": "Offer List",
             "is_service_trace": True,
             "data": {
-                "To": "Operation Manager <Mariela.Tsvetkova@rizosresorts.gr>; Rooms Division Manager - Sandy Beach <harrys.palikiras@rizosresorts.gr>; Front Office Manager Sandy Beach <fom.sandy@rizosresorts.gr>;",
-                "CC": "Guest Relations Sandy Beach <guest.sandybeach@rizosresorts.gr>;",
+                "To": TO_RECIPIENTS,
+                "CC": CC_RECIPIENTS,
                 "Subject": subject,
                 "HTMLBody": html_body,
                 "Attachment": filepath

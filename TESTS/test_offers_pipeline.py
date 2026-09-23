@@ -1836,5 +1836,96 @@ class TestSendEmailButtonState(unittest.TestCase):
                           "Buttons should have opposite states when file exists")
 
 
+class TestFBEmailRecipients(unittest.TestCase):
+    """
+    Test suite for shared F&B recipient lists (Step 8).
+    Verifies that TO_RECIPIENTS and CC_RECIPIENTS are correctly imported
+    and contain all expected email addresses.
+    """
+
+    def test_to_recipients_import_and_content(self):
+        """
+        Test 1: TO_RECIPIENTS can be imported and contains all expected F&B addresses.
+        """
+        from MODULES.common.fb_email_recipients import TO_RECIPIENTS
+
+        # All expected F&B staff should be present
+        expected_emails = [
+            "gabriela.stere@rizosresorts.gr",  # F&B Manager
+            "chef.sandybeach@rizosresorts.gr",  # Executive Chef
+            "headchef.sandybeach@rizosresorts.gr",  # Head Chef
+            "assistfb.sandybeach@rizosresorts.gr",  # Assist F&B
+            "assistfb2.sandybeach@rizosresorts.gr",  # Assist F&B 2
+        ]
+
+        for email in expected_emails:
+            self.assertIn(email, TO_RECIPIENTS,
+                         f"TO_RECIPIENTS must contain {email}")
+
+    def test_cc_recipients_import_and_content(self):
+        """
+        Test 2: CC_RECIPIENTS can be imported and contains all expected operations/guest-facing addresses.
+        Specifically verifies that sfragoyiannis@rizosresorts.gr is present (the new addition to Cake Memo).
+        """
+        from MODULES.common.fb_email_recipients import CC_RECIPIENTS
+
+        # All expected operations staff should be present
+        expected_emails = [
+            "Mariela.Tsvetkova@rizosresorts.gr",  # Operation Manager
+            "harrys.palikiras@rizosresorts.gr",  # Rooms Division Manager
+            "sfragoyiannis@rizosresorts.gr",  # New addition to Cake Memo's CC
+            "fom.sandy@rizosresorts.gr",  # Front Office Manager
+            "guest.sandybeach@rizosresorts.gr",  # Guest Relations
+        ]
+
+        for email in expected_emails:
+            self.assertIn(email, CC_RECIPIENTS,
+                         f"CC_RECIPIENTS must contain {email}")
+
+    def test_offers_payload_uses_shared_recipients(self):
+        """
+        Test 3: OffersOptionWidget._generate_offers_payload uses the shared TO_RECIPIENTS and CC_RECIPIENTS.
+        """
+        from MODULES.common.fb_email_recipients import TO_RECIPIENTS, CC_RECIPIENTS
+
+        # Create QApplication if needed for Qt widgets
+        app = QApplication.instance()
+        if app is None:
+            app = QApplication([])
+
+        widget = OffersOptionWidget()
+        payload = widget._generate_offers_payload("test_file.docx")
+
+        # Verify the payload contains the correct recipient strings
+        self.assertEqual(payload["data"]["To"], TO_RECIPIENTS,
+                        "Offers payload must use shared TO_RECIPIENTS")
+        self.assertEqual(payload["data"]["CC"], CC_RECIPIENTS,
+                        "Offers payload must use shared CC_RECIPIENTS")
+
+    def test_cake_memo_payload_uses_shared_recipients(self):
+        """
+        Test 4: generate_cake_memo_outlook_payload uses the shared TO_RECIPIENTS and CC_RECIPIENTS.
+        """
+        from MODULES.common.fb_email_recipients import TO_RECIPIENTS, CC_RECIPIENTS
+        from OPTIONS.cake_memo_option import generate_cake_memo_outlook_payload
+
+        # Create a minimal memo_data dict with required fields
+        memo_data = {
+            "room_number": "1101",
+            "cake_date_display": "23/09",
+            "cake_location": "ROOM",
+            "cake_time": "19:00",
+            "memo_month_year": "09.2026"
+        }
+
+        payload = generate_cake_memo_outlook_payload("dummy_path.docx", memo_data)
+
+        # Verify the payload contains the correct recipient strings
+        self.assertEqual(payload["data"]["To"], TO_RECIPIENTS,
+                        "Cake Memo payload must use shared TO_RECIPIENTS")
+        self.assertEqual(payload["data"]["CC"], CC_RECIPIENTS,
+                        "Cake Memo payload must use shared CC_RECIPIENTS")
+
+
 if __name__ == "__main__":
     unittest.main()
