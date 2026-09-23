@@ -9,6 +9,8 @@ import os
 import shutil
 import tempfile
 import unittest
+from datetime import datetime, timedelta
+from unittest.mock import patch
 
 import MODULES.offers_module as om
 from MODULES.offers_module import (
@@ -280,6 +282,44 @@ class TestOffersPipelineHermetic(unittest.TestCase):
         # Verify room 7202 (Fruit from shifted) is in all_arrivals
         room_7202 = [a for a in all_arrivals if a["room_number"] == "7202"]
         self.assertEqual(len(room_7202), 1, "Room 7202 from shifted block should be in all_arrivals")
+
+    def test_todays_file_accepted(self):
+        """
+        Date-stamp test 1: A CSV file with today's creation timestamp
+        should be accepted and pipeline succeeds.
+        """
+        csv_path = os.path.join(self.temp_dir, "beach_arrivals_today.csv")
+        create_synthetic_beach_csv(csv_path)
+
+        # File is freshly created, so it has today's timestamp naturally
+        ok, msg, path = execute_offers_pipeline(selected_csvs=[csv_path])
+        self.assertTrue(ok, f"Pipeline should accept today's file, but got: {msg}")
+        self.assertIn("Success", msg)
+        self.assertIsNotNone(path)
+        self.assertTrue(os.path.exists(path))
+
+    def test_stale_file_rejected(self):
+        """
+        Date-stamp test 2: A CSV file with a stale (non-today) creation timestamp
+        should be rejected with a clear date mismatch message.
+
+        This test monkeypatches _get_file_creation_date to return a date
+        from yesterday, avoiding fighting with Windows NTFS ctime semantics.
+        """
+        csv_path = os.path.join(self.temp_dir, "beach_arrivals_stale.csv")
+        create_synthetic_beach_csv(csv_path)
+
+        # Monkeypatch the helper function to return yesterday's date
+        yesterday = datetime.now().date() - timedelta(days=1)
+
+        from MODULES.offers import pipeline
+        with patch.object(pipeline, '_get_file_creation_date', return_value=yesterday):
+            ok, msg, path = execute_offers_pipeline(selected_csvs=[csv_path])
+
+        self.assertFalse(ok, f"Pipeline should reject stale file, but succeeded with msg: {msg}")
+        self.assertIsNone(path)
+        # Verify the error message mentions today/date mismatch
+        self.assertIn("today", msg.lower(), f"Error message should mention today's date: {msg}")
 
 
 if __name__ == "__main__":

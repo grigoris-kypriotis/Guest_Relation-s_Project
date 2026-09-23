@@ -14,6 +14,16 @@ from MODULES.offers import paths as paths_module
 from MODULES.offers.csv_parser import identify_digit_type, extract_excel_data
 
 
+def _get_file_creation_date(file_path: str):
+    """
+    Get the creation date of a file.
+
+    Returns a datetime.date object representing the file's creation time.
+    This is extracted as a separate function to allow easy mocking in tests.
+    """
+    return datetime.fromtimestamp(os.path.getctime(file_path)).date()
+
+
 def duplicate_for_update(file_path):
     """
     Create a copy of an offer file for updating, with " UPDATED" suffix.
@@ -98,6 +108,10 @@ def execute_offers_pipeline(selected_csvs=None):
         t = identify_digit_type(csv_files[0])
         if t != 4:
             return False, "CSV validation failed.", None
+
+        csv_ctime = _get_file_creation_date(csv_files[0])
+        if csv_ctime != datetime.now().date():
+            return False, f"Arrivals CSV is not today's file (created {csv_ctime.strftime('%Y-%m-%d')}).", None
 
         beach_csv = csv_files[0]
         beach_data, _, all_arrivals = extract_excel_data(beach_csv)
