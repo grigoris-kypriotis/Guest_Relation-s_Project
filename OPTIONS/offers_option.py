@@ -227,21 +227,26 @@ class OffersOptionWidget(QWidget):
     def build_submenu(self) -> QWidget:
         """Constructs the OFFERS sidebar submenu, wires its buttons to this widget's own handlers, and returns it."""
         submenu = QWidget()
+        submenu.setObjectName("OffersSubmenuContainer")
         submenu_layout = QVBoxLayout(submenu)
-        submenu_layout.setContentsMargins(0, 4, 0, 6)
-        submenu_layout.setSpacing(5)
+        submenu_layout.setContentsMargins(12, 8, 4, 8)
+        submenu_layout.setSpacing(3)
         submenu.setStyleSheet("""
-            QWidget { background-color: transparent; }
+            #OffersSubmenuContainer {
+                background-color: #F7F7F7;
+                border-left: 4px solid #FF6B9D;
+                border-radius: 0px 4px 4px 0px;
+            }
             QPushButton {
                 background-color: #FFE4E1;
                 border: 1px solid #FFB6C1;
-                border-radius: 4px;
-                padding: 7px 10px 7px 20px;
+                border-radius: 3px;
+                padding: 6px 8px 6px 10px;
                 text-align: left;
                 font-size: 11px;
                 font-weight: bold;
                 color: black;
-                margin-bottom: 2px;
+                margin: 1px 0px;
             }
             QPushButton:hover { background-color: #FF69B4; color: white; }
             QPushButton:disabled {
@@ -261,15 +266,20 @@ class OffersOptionWidget(QWidget):
             QPushButton {
                 background-color: #B0E0E6;
                 border: 1px solid #4682B4;
-                border-radius: 4px;
-                padding: 7px 10px 7px 20px;
+                border-radius: 3px;
+                padding: 6px 8px 6px 10px;
                 text-align: left;
                 font-size: 11px;
                 font-weight: bold;
                 color: #0F3460;
-                margin-bottom: 2px;
+                margin: 1px 0px;
             }
             QPushButton:hover { background-color: #4682B4; color: white; }
+            QPushButton:disabled {
+                background-color: #B8D4E8;
+                border: 1px solid #8BA9C8;
+                color: #5A7FA0;
+            }
         """
         self.btn_save.setStyleSheet(blue_sub_style)
         self.btn_close.setStyleSheet(blue_sub_style)
