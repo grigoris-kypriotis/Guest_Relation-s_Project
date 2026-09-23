@@ -131,27 +131,6 @@ def resolve_todays_offer_file(offer_lists_dir: Optional[str] = None) -> Optional
     return None
 
 
-def get_todays_offer_list():
-    """
-    Find today's base offer list file.
-
-    Searches for files matching today's date pattern in FINAL_FOLDER.
-    Returns the file with the most recent modification time.
-
-    Returns:
-        Path to today's offer file, or None if not found
-    """
-    from MODULES import offers_module as facade
-
-    now = datetime.now()
-    target_folder = os.path.abspath(os.path.join(facade.FINAL_FOLDER, f"GR OFFERS {now.month}.{now.year}"))
-    base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
-    search_pattern = os.path.abspath(os.path.join(target_folder, f"{base_name}*.docx"))
-    files = glob.glob(search_pattern)
-    if not files: return None
-    return os.path.abspath(max(files, key=os.path.getmtime))
-
-
 def execute_offers_pipeline(selected_csvs=None):
     """
     Execute the complete offer list generation pipeline.

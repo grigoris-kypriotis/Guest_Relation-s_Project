@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import pyqtSignal
 
 from MODULES.offers_module import (
-    execute_offers_pipeline, get_todays_offer_list,
+    execute_offers_pipeline,
     duplicate_for_update, resolve_todays_offer_file, ARRIVALS_FOLDER
 )
 from MODULES.offers.pipeline import get_last_record_failures
@@ -68,6 +68,15 @@ class OffersOptionWidget(QWidget):
         if self.log_callback:
             self.log_callback("OFFERS", message, level)
 
+    def _refresh_button_states(self) -> None:
+        """
+        Refresh the enabled/disabled state of the Create Offerlist button
+        based on whether today's offer file already exists.
+        """
+        offer_lists_dir = load_app_settings().get("storage", {}).get("offer_lists_dir")
+        exists = resolve_todays_offer_file(offer_lists_dir=offer_lists_dir) is not None
+        self.btn_create.setEnabled(not exists)
+
     # ----- Document lifecycle -----
 
     def handle_doc_save(self) -> None:
@@ -103,8 +112,10 @@ class OffersOptionWidget(QWidget):
             self.is_update_mode = False
             self._log("Action: Create Offerlist triggered")
 
-            if get_todays_offer_list() is not None:
-                self._log("Today's offer list already exists. Operation denied. Use UPDATE Offerlist.", "WARNING")
+            # Defensive guard: today's file should not already exist (button should be disabled, but check anyway)
+            offer_lists_dir = load_app_settings().get("storage", {}).get("offer_lists_dir")
+            if resolve_todays_offer_file(offer_lists_dir=offer_lists_dir) is not None:
+                self._log("Today's offer list already exists. Operation denied. Use UPDATE Offerlist.", "ERROR")
                 return
 
             self._log("Processing Data... Please wait.")
@@ -134,6 +145,8 @@ class OffersOptionWidget(QWidget):
             if pipeline_status and final_path:
                 self._log(f"Opening generated document in OfficeViewer: {os.path.basename(final_path)}")
                 self.office_viewer.open_file(final_path)
+                # Refresh button states to reflect that today's file now exists
+                self._refresh_button_states()
         except Exception as e:
             self._log(f"Creation pipeline error: {e}", "ERROR")
 
@@ -213,8 +226,8 @@ class OffersOptionWidget(QWidget):
             self._log(f"Save and close error: {e}", "ERROR")
 
     def activate(self) -> None:
-        """Called when this option is selected from the menu."""
-        pass  # Offers view is stateful — no auto-refresh needed
+        """Called when this option is selected from the menu. Refresh button states."""
+        self._refresh_button_states()
 
     def build_submenu(self) -> QWidget:
         """Constructs the OFFERS sidebar submenu, wires its buttons to this widget's own handlers, and returns it."""
@@ -236,6 +249,11 @@ class OffersOptionWidget(QWidget):
                 margin-bottom: 2px;
             }
             QPushButton:hover { background-color: #FF69B4; color: white; }
+            QPushButton:disabled {
+                background-color: #D3D3D3;
+                border: 1px solid #A9A9A9;
+                color: #777777;
+            }
         """)
 
         self.btn_create = QPushButton("Create Offerlist")
@@ -275,5 +293,8 @@ class OffersOptionWidget(QWidget):
         submenu_layout.addWidget(self.btn_close)
         submenu_layout.addWidget(self.btn_save_close)
         submenu.hide()
+
+        # Refresh button states so the Create button starts in the correct state
+        self._refresh_button_states()
 
         return submenu

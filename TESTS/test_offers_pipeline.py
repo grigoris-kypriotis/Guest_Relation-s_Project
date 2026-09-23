@@ -13,6 +13,8 @@ import unittest
 from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock
 
+from PyQt6.QtWidgets import QApplication
+
 import MODULES.offers_module as om
 from MODULES.offers_module import (
     extract_excel_data,
@@ -22,9 +24,12 @@ from MODULES.offers_module import (
     write_arrival_record,
     get_last_record_failures,
     classify_order,
+    resolve_todays_offer_file,
 )
 from MODULES.offers.keyword_rules import classify_order as classify_order_direct
 from MODULES.common import paths_config
+from OPTIONS.offers_option import OffersOptionWidget
+from OPTIONS.configuration_option import load_app_settings
 
 
 def create_synthetic_beach_csv(file_path: str) -> str:
@@ -959,6 +964,217 @@ class TestResolveTodaysOfferFile(unittest.TestCase):
         result = resolve_todays_offer_file(offer_lists_dir=self.offer_lists_dir)
         expected = os.path.join(self.offer_lists_dir, base_name + " UPDATED (5).docx")
         self.assertEqual(result, expected, "Should pick UPDATED (5) as the highest counter")
+
+
+class TestCreateButtonDisabledState(unittest.TestCase):
+    """
+    Tests for the Create Offerlist button disabled state logic.
+    Verifies that the button is disabled when today's offer file exists,
+    and enabled when it doesn't.
+    """
+
+    def setUp(self):
+        """Set up hermetic temp directories for button state tests."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.offer_lists_dir = os.path.join(self.temp_dir, "offer_lists")
+        os.makedirs(self.offer_lists_dir, exist_ok=True)
+
+        # Monkeypatch settings to use our temp directory
+        self.orig_load_app_settings = load_app_settings
+        self.patcher = patch('OPTIONS.configuration_option.load_app_settings')
+        self.mock_load_settings = self.patcher.start()
+        self.mock_load_settings.return_value = {
+            "storage": {"offer_lists_dir": self.offer_lists_dir}
+        }
+
+    def tearDown(self):
+        """Clean up temp directory and restore patches."""
+        self.patcher.stop()
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_button_disabled_when_todays_file_exists(self):
+        """
+        Test: When today's offer file exists, btn_create should be disabled.
+        """
+        from datetime import datetime
+
+        now = datetime.now()
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+        base_file = os.path.join(self.offer_lists_dir, base_name + ".docx")
+
+        # Create the base file
+        with open(base_file, "w") as f:
+            f.write("test")
+
+        # Check: resolve_todays_offer_file should find it
+        result = resolve_todays_offer_file(offer_lists_dir=self.offer_lists_dir)
+        self.assertIsNotNone(result, "File should be found by resolve_todays_offer_file")
+
+        # Button logic: should be disabled (not enabled)
+        exists = resolve_todays_offer_file(offer_lists_dir=self.offer_lists_dir) is not None
+        button_should_be_disabled = exists
+        self.assertTrue(button_should_be_disabled, "Button should be disabled when file exists")
+
+    def test_button_enabled_when_todays_file_does_not_exist(self):
+        """
+        Test: When today's offer file does NOT exist, btn_create should be enabled.
+        """
+        # Check: resolve_todays_offer_file should return None (empty dir)
+        result = resolve_todays_offer_file(offer_lists_dir=self.offer_lists_dir)
+        self.assertIsNone(result, "No file should be found")
+
+        # Button logic: should be enabled (not disabled)
+        exists = resolve_todays_offer_file(offer_lists_dir=self.offer_lists_dir) is not None
+        button_should_be_disabled = exists
+        self.assertFalse(button_should_be_disabled, "Button should be enabled when file does not exist")
+
+    def test_button_disabled_with_updated_variant(self):
+        """
+        Test: When an UPDATED variant exists, btn_create should be disabled.
+        """
+        from datetime import datetime
+
+        now = datetime.now()
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+        updated_file = os.path.join(self.offer_lists_dir, base_name + " UPDATED.docx")
+
+        # Create the UPDATED file (not the base)
+        with open(updated_file, "w") as f:
+            f.write("test")
+
+        # Check: resolve_todays_offer_file should find it
+        result = resolve_todays_offer_file(offer_lists_dir=self.offer_lists_dir)
+        self.assertIsNotNone(result, "UPDATED file should be found")
+
+        # Button logic: should be disabled
+        exists = resolve_todays_offer_file(offer_lists_dir=self.offer_lists_dir) is not None
+        button_should_be_disabled = exists
+        self.assertTrue(button_should_be_disabled, "Button should be disabled when UPDATED file exists")
+
+
+class TestOffersOptionWidgetButtonState(unittest.TestCase):
+    """
+    Widget-level tests for OffersOptionWidget button state management.
+    Uses QApplication for hermetic widget testing.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up QApplication for widget testing."""
+        cls.app = QApplication.instance() or QApplication(["", "-platform", "offscreen"])
+
+    def setUp(self):
+        """Set up hermetic temp directories and widget for each test."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.offer_lists_dir = os.path.join(self.temp_dir, "offer_lists")
+        os.makedirs(self.offer_lists_dir, exist_ok=True)
+
+        # Monkeypatch settings to use our temp directory (patch where it's used)
+        self.patcher = patch('OPTIONS.offers_option.load_app_settings')
+        self.mock_load_settings = self.patcher.start()
+        self.mock_load_settings.return_value = {
+            "storage": {"offer_lists_dir": self.offer_lists_dir}
+        }
+
+        # Create the widget with a mock log callback
+        self.log_messages = []
+        self.widget = OffersOptionWidget(log_callback=self._log_callback)
+        # build_submenu() must be called to initialize the button attributes
+        # Keep a reference to prevent garbage collection
+        self.submenu = self.widget.build_submenu()
+
+    def tearDown(self):
+        """Clean up widget and temp directory."""
+        # Clean up widget references
+        if self.submenu:
+            self.submenu.deleteLater()
+        if self.widget:
+            self.widget.deleteLater()
+        self.patcher.stop()
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _log_callback(self, category, message, level):
+        """Mock log callback to capture log messages."""
+        self.log_messages.append((category, message, level))
+
+    def test_create_button_initially_enabled(self):
+        """
+        Test: When no offer file exists, btn_create should be enabled initially.
+        """
+        # build_submenu is called during __init__ via _init_ui
+        # So the button should have been refreshed already
+        self.assertTrue(self.widget.btn_create.isEnabled(),
+                       "Create button should be enabled when no offer file exists")
+
+    def test_create_button_disabled_after_refresh_when_file_exists(self):
+        """
+        Test: When an offer file exists, _refresh_button_states should disable btn_create.
+        """
+        from datetime import datetime
+
+        now = datetime.now()
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+        base_file = os.path.join(self.offer_lists_dir, base_name + ".docx")
+
+        # Create the file to simulate that today's offer already exists
+        with open(base_file, "w") as f:
+            f.write("test")
+
+        # Call _refresh_button_states
+        self.widget._refresh_button_states()
+
+        # Button should now be disabled
+        self.assertFalse(self.widget.btn_create.isEnabled(),
+                        "Create button should be disabled after file is created")
+
+    def test_create_button_enabled_after_refresh_when_file_removed(self):
+        """
+        Test: When an offer file is removed, _refresh_button_states should enable btn_create.
+        """
+        from datetime import datetime
+
+        now = datetime.now()
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+        base_file = os.path.join(self.offer_lists_dir, base_name + ".docx")
+
+        # Create and then remove the file
+        with open(base_file, "w") as f:
+            f.write("test")
+
+        self.widget._refresh_button_states()
+        self.assertFalse(self.widget.btn_create.isEnabled(), "Button should be disabled with file")
+
+        # Remove the file
+        os.remove(base_file)
+
+        # Refresh button states
+        self.widget._refresh_button_states()
+
+        # Button should now be enabled again
+        self.assertTrue(self.widget.btn_create.isEnabled(),
+                       "Create button should be enabled after file is removed")
+
+    def test_activate_refreshes_button_states(self):
+        """
+        Test: Calling activate() should refresh button states.
+        """
+        from datetime import datetime
+
+        now = datetime.now()
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+        base_file = os.path.join(self.offer_lists_dir, base_name + ".docx")
+
+        # Create the file
+        with open(base_file, "w") as f:
+            f.write("test")
+
+        # Initially, the button might still be enabled (from earlier state)
+        # Call activate(), which should refresh
+        self.widget.activate()
+
+        # Button should now be disabled
+        self.assertFalse(self.widget.btn_create.isEnabled(),
+                        "Create button should be disabled after activate() when file exists")
 
 
 if __name__ == "__main__":

@@ -46,7 +46,6 @@ from MODULES.offers.records import (
 from MODULES.offers.pipeline import (
     resolve_todays_offer_file,
     duplicate_for_update,
-    get_todays_offer_list,
     execute_offers_pipeline,
     get_last_record_failures,
 )
@@ -68,7 +67,6 @@ __all__ = [
     "write_arrival_record",
     "resolve_todays_offer_file",
     "duplicate_for_update",
-    "get_todays_offer_list",
     "execute_offers_pipeline",
     "get_last_record_failures",
     "generate_word_document",
