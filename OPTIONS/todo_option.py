@@ -65,6 +65,8 @@ class TodoWidget(QWidget):
         for task_id, task_widget in self.active_tasks.items():
             if task_widget.lbl_desc.text() == description:
                 task_widget.payload = payload or {}
+                if self.log_callback:
+                    self.log_callback("To Do List", f"Task reused (updated payload): {description}", "INFO")
                 return task_id
         return self.add_task_auto(description, payload)
 

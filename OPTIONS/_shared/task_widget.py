@@ -35,7 +35,7 @@ class TaskWidget(QWidget):
         layout.addStretch()
         layout.addWidget(self.btn_state)
 
-    def manual_draft_outlook(self):
+    def manual_draft_outlook(self, error_callback=None):
         try:
             import win32com.client
             outlook = win32com.client.Dispatch("Outlook.Application")
@@ -56,6 +56,8 @@ class TaskWidget(QWidget):
                 self.set_state("📨")
         except Exception as e:
             print(f"Failed to draft outlook email: {e}")
+            if error_callback:
+                error_callback(e)
 
     def show_status_menu(self):
         menu = QMenu(self)
