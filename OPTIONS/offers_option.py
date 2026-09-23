@@ -128,8 +128,15 @@ class OffersOptionWidget(QWidget):
             task_id = self.todo_widget.get_or_create_task("Send Offerlist Email", payload)
             task_widget = self.todo_widget.active_tasks.get(task_id)
             if task_widget:
-                task_widget.manual_draft_outlook(error_callback=self._handle_outlook_error)
-                self._log(f"Outlook draft opened for: {os.path.basename(file_path)}", "SUCCESS")
+                draft_failure = {}
+
+                def _on_draft_error(error: Exception) -> None:
+                    draft_failure["error"] = error
+                    self._handle_outlook_error(error)
+
+                task_widget.manual_draft_outlook(error_callback=_on_draft_error)
+                if "error" not in draft_failure:
+                    self._log(f"Outlook draft opened for: {os.path.basename(file_path)}", "SUCCESS")
             else:
                 self._log("Task created but widget reference not found — draft not opened.", "ERROR")
         except Exception as e:
