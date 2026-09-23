@@ -11,7 +11,6 @@ from typing import Optional, Callable
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QFrame, QFileDialog, QMessageBox, QPushButton
 )
-from PyQt6.QtCore import pyqtSignal
 
 from MODULES.offers_module import (
     execute_offers_pipeline,
@@ -27,11 +26,11 @@ class OffersOptionWidget(QWidget):
     Offers view: document viewer container with create/update pipeline,
     save/close lifecycle, and status label.
     """
-    task_generated = pyqtSignal(str, dict)
 
-    def __init__(self, log_callback: Optional[Callable] = None, parent: Optional[QWidget] = None):
+    def __init__(self, log_callback: Optional[Callable] = None, todo_widget=None, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.log_callback = log_callback
+        self.todo_widget = todo_widget
         self.is_update_mode = False
         self._init_ui()
 
@@ -59,7 +58,6 @@ class OffersOptionWidget(QWidget):
         oc_layout.addWidget(self.offers_status)
 
         self.office_viewer = OfficeViewer()
-        self.office_viewer.file_saved_and_closed.connect(self._handle_save_and_close)
         oc_layout.addWidget(self.office_viewer, stretch=1)
 
         offers_layout.addWidget(offers_container)
@@ -70,22 +68,32 @@ class OffersOptionWidget(QWidget):
 
     def _refresh_button_states(self) -> None:
         """
-        Refresh the enabled/disabled state of the Create Offerlist button
+        Refresh the enabled/disabled state of the Create and Send Email buttons
         based on whether today's offer file already exists.
         """
         offer_lists_dir = load_app_settings().get("storage", {}).get("offer_lists_dir")
         exists = resolve_todays_offer_file(offer_lists_dir=offer_lists_dir) is not None
         self.btn_create.setEnabled(not exists)
+        self.btn_send_email.setEnabled(exists)
 
     # ----- Document lifecycle -----
 
     def handle_doc_save(self) -> None:
-        """Save the currently open document."""
+        """Save the currently open document. In update mode, also creates a new UPDATED variant."""
         try:
             self.offers_status.hide()
             self.office_viewer.save_file()
-            if self.office_viewer.current_filepath:
-                self._log(f"Document saved: {os.path.basename(self.office_viewer.current_filepath)}")
+            if not self.office_viewer.current_filepath:
+                return
+            self._log(f"Document saved: {os.path.basename(self.office_viewer.current_filepath)}")
+            if self.is_update_mode:
+                try:
+                    new_path = duplicate_for_update(self.office_viewer.current_filepath)
+                    self._log(f"Update saved as: {os.path.basename(new_path)}", "SUCCESS")
+                except Exception as e:
+                    self._log(f"Update save error: {e}", "ERROR")
+                    return
+                self._refresh_button_states()
         except Exception as e:
             self._log(f"Save error: {e}", "ERROR")
 
@@ -99,9 +107,28 @@ class OffersOptionWidget(QWidget):
         except Exception as e:
             self._log(f"Close error: {e}", "ERROR")
 
-    def handle_doc_save_and_close(self) -> None:
-        """Trigger save and close on the OfficeViewer."""
-        self.office_viewer.save_and_close()
+    def handle_send_email(self) -> None:
+        """Resolves today's offer file, opens an Outlook draft (display-only, never auto-sent),
+        and reuses/creates the 'Send Offerlist Email' To-Do task."""
+        try:
+            offer_lists_dir = load_app_settings().get("storage", {}).get("offer_lists_dir")
+            file_path = resolve_todays_offer_file(offer_lists_dir=offer_lists_dir)
+            if not file_path:
+                self._log("No offer list found for today. Send Email unavailable.", "ERROR")
+                return
+            if self.todo_widget is None:
+                self._log("To-Do list unavailable; cannot create/send task.", "ERROR")
+                return
+            payload = self._generate_offers_payload(file_path)
+            task_id = self.todo_widget.get_or_create_task("Send Offerlist Email", payload)
+            task_widget = self.todo_widget.active_tasks.get(task_id)
+            if task_widget:
+                task_widget.manual_draft_outlook()
+                self._log(f"Outlook draft opened for: {os.path.basename(file_path)}", "SUCCESS")
+            else:
+                self._log("Task created but widget reference not found — draft not opened.", "ERROR")
+        except Exception as e:
+            self._log(f"Send Email error: {e}", "ERROR")
 
     # ----- Pipeline actions -----
 
@@ -177,7 +204,7 @@ class OffersOptionWidget(QWidget):
           Dear all,<br>Kindly find attached the Offerlist.<br><br>
           For any further information don't hesitate to contact the Guest Relations Team.
         </div>"""
-        
+
         return {
             "type": "outlook_draft",
             "category": "Offer",
@@ -191,39 +218,6 @@ class OffersOptionWidget(QWidget):
                 "Attachment": filepath
             }
         }
-
-    def _handle_save_and_close(self, filepath: str) -> None:
-        """
-        Offerlist Save & Close Handler:
-        Strictly saves/updates the Word document in OUTPUT/OFFERS/.
-        Routes the task to generate an Outlook email to the To-Do list.
-        """
-        try:
-            self.offers_status.hide()
-            final_path = filepath
-            if self.is_update_mode:
-                self._log(f"Saving updated offerlist: {os.path.basename(filepath)}")
-                try:
-                    new_path = duplicate_for_update(filepath)
-                    self._log(f"Offerlist updated & saved successfully: {os.path.basename(new_path)}", "SUCCESS")
-                    final_path = new_path
-                except Exception as e:
-                    self._log(f"Update save error: {e}", "ERROR")
-                    return
-            else:
-                self._log(f"Offerlist saved successfully: {os.path.basename(filepath)}", "SUCCESS")
-                
-            payload = self._generate_offers_payload(final_path)
-            self.task_generated.emit(f"Send Offerlist Email", payload)
-            
-            QMessageBox.information(
-                self, 
-                "Saved", 
-                f"Offerlist saved successfully:\n{os.path.basename(final_path)}\n\n"
-                f"A task to send the Outlook email has been added to the To-Do List."
-            )
-        except Exception as e:
-            self._log(f"Save and close error: {e}", "ERROR")
 
     def activate(self) -> None:
         """Called when this option is selected from the menu. Refresh button states."""
@@ -260,7 +254,7 @@ class OffersOptionWidget(QWidget):
         self.btn_update = QPushButton("UPDATE Offerlist")
         self.btn_save = QPushButton("SAVE")
         self.btn_close = QPushButton("CLOSE")
-        self.btn_save_close = QPushButton("SAVE & CLOSE")
+        self.btn_send_email = QPushButton("Send Email")
 
         blue_sub_style = """
             QPushButton {
@@ -278,23 +272,23 @@ class OffersOptionWidget(QWidget):
         """
         self.btn_save.setStyleSheet(blue_sub_style)
         self.btn_close.setStyleSheet(blue_sub_style)
-        self.btn_save_close.setStyleSheet(blue_sub_style)
+        self.btn_send_email.setStyleSheet(blue_sub_style)
 
         self.btn_create.clicked.connect(self.run_offers_creation)
         self.btn_update.clicked.connect(self.run_offers_update)
         self.btn_save.clicked.connect(self.handle_doc_save)
         self.btn_close.clicked.connect(self.handle_doc_close)
-        self.btn_save_close.clicked.connect(self.handle_doc_save_and_close)
+        self.btn_send_email.clicked.connect(self.handle_send_email)
 
         submenu_layout.addWidget(self.btn_create)
         submenu_layout.addWidget(self.btn_update)
         submenu_layout.addSpacing(14)
         submenu_layout.addWidget(self.btn_save)
         submenu_layout.addWidget(self.btn_close)
-        submenu_layout.addWidget(self.btn_save_close)
+        submenu_layout.addWidget(self.btn_send_email)
         submenu.hide()
 
-        # Refresh button states so the Create button starts in the correct state
+        # Refresh button states so the Create/Send Email buttons start in the correct state
         self._refresh_button_states()
 
         return submenu

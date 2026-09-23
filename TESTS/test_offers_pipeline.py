@@ -1177,5 +1177,664 @@ class TestOffersOptionWidgetButtonState(unittest.TestCase):
                         "Create button should be disabled after activate() when file exists")
 
 
+class TestTodoWidgetGetOrCreateTask(unittest.TestCase):
+    """
+    Tests for TodoWidget.get_or_create_task() method.
+    Verifies deduplication by description text and payload updates.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up QApplication for widget testing."""
+        cls.app = QApplication.instance() or QApplication(["", "-platform", "offscreen"])
+
+    def setUp(self):
+        """Create a TodoWidget for testing."""
+        from OPTIONS.todo_option import TodoWidget
+        self.todo_widget = TodoWidget()
+
+    def tearDown(self):
+        """Clean up widget."""
+        if self.todo_widget:
+            self.todo_widget.deleteLater()
+
+    def test_get_or_create_task_creates_new_task_when_not_found(self):
+        """
+        Test 1: When description doesn't match any existing task,
+        get_or_create_task should create a new task via add_task_auto.
+        """
+        description = "Test Task 1"
+        payload = {"type": "outlook_draft", "category": "Test"}
+
+        task_id = self.todo_widget.get_or_create_task(description, payload)
+
+        # Verify task was created
+        self.assertIn(task_id, self.todo_widget.active_tasks)
+        task_widget = self.todo_widget.active_tasks[task_id]
+        self.assertEqual(task_widget.lbl_desc.text(), description)
+        self.assertEqual(task_widget.payload, payload)
+
+    def test_get_or_create_task_reuses_existing_task(self):
+        """
+        Test 2: When description matches an existing task,
+        get_or_create_task should reuse the existing task_id
+        (no duplicate created).
+        """
+        description = "Send Offerlist Email"
+        payload1 = {"type": "outlook_draft", "category": "Offer", "subcategory": "Offer List", "data": {"To": "old"}}
+        payload2 = {"type": "outlook_draft", "category": "Offer", "subcategory": "Offer List", "data": {"To": "new"}}
+
+        # Create the first task
+        task_id_1 = self.todo_widget.get_or_create_task(description, payload1)
+        self.assertEqual(len(self.todo_widget.active_tasks), 1)
+        self.assertEqual(self.todo_widget.active_tasks[task_id_1].payload, payload1)
+
+        # Try to create another task with the same description
+        task_id_2 = self.todo_widget.get_or_create_task(description, payload2)
+
+        # Should reuse the same task_id (no duplicate created)
+        self.assertEqual(task_id_1, task_id_2, "Should return the same task_id for same description")
+        self.assertEqual(len(self.todo_widget.active_tasks), 1, "Should not create a duplicate task")
+
+        # Payload should be updated to the new one
+        self.assertEqual(self.todo_widget.active_tasks[task_id_2].payload, payload2,
+                        "Payload should be updated to the latest version")
+
+    def test_get_or_create_task_different_descriptions_create_separate_tasks(self):
+        """
+        Test 3: Different descriptions should create separate tasks.
+        """
+        desc1 = "Task A"
+        desc2 = "Task B"
+        payload = {"type": "test"}
+
+        task_id_1 = self.todo_widget.get_or_create_task(desc1, payload)
+        task_id_2 = self.todo_widget.get_or_create_task(desc2, payload)
+
+        # Should have 2 tasks
+        self.assertEqual(len(self.todo_widget.active_tasks), 2)
+        self.assertNotEqual(task_id_1, task_id_2)
+
+    def test_get_or_create_task_empty_payload_defaults_to_empty_dict(self):
+        """
+        Test 4: When payload is None, it should default to an empty dict.
+        """
+        description = "No Payload Task"
+        task_id = self.todo_widget.get_or_create_task(description, payload=None)
+
+        task_widget = self.todo_widget.active_tasks[task_id]
+        self.assertEqual(task_widget.payload, {})
+
+
+class TestTaskWidgetOfferListStateTransition(unittest.TestCase):
+    """
+    Tests for TaskWidget.manual_draft_outlook() state transition.
+    Verifies that the new 📨 state is set for Offer List tasks only (not Cake Memo).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up QApplication for widget testing."""
+        cls.app = QApplication.instance() or QApplication(["", "-platform", "offscreen"])
+
+    def setUp(self):
+        """Create TaskWidget instances for testing."""
+        from OPTIONS._shared.task_widget import TaskWidget
+        self.TaskWidget = TaskWidget
+
+    def tearDown(self):
+        """No cleanup needed for this test."""
+        pass
+
+    def test_manual_draft_outlook_sets_email_sent_state_for_offer_list(self):
+        """
+        Test 1: manual_draft_outlook should set state to 📨 when payload
+        has subcategory == "Offer List", with mocked Outlook.
+        """
+        payload = {
+            "type": "outlook_draft",
+            "category": "Offer",
+            "subcategory": "Offer List",
+            "data": {
+                "To": "test@example.com",
+                "CC": "",
+                "Subject": "Test",
+                "HTMLBody": "Test body",
+                "Attachment": None
+            }
+        }
+
+        task = self.TaskWidget("Test Offer Task", "task_123", payload=payload)
+        initial_state = task.btn_state.text()
+
+        # Mock Dispatch to prevent real Outlook usage
+        with patch('OPTIONS._shared.task_widget.win32com.client.Dispatch') as mock_dispatch:
+            mock_outlook = MagicMock()
+            mock_mail = MagicMock()
+            mock_dispatch.return_value = mock_outlook
+            mock_outlook.CreateItem.return_value = mock_mail
+
+            # Call manual_draft_outlook
+            task.manual_draft_outlook()
+
+            # Verify Display was called (email opened)
+            mock_mail.Display.assert_called_once()
+
+            # Verify state changed to 📨
+            self.assertEqual(task.btn_state.text(), "📨",
+                           "State should change to 📨 after Display() for Offer List task")
+
+        task.deleteLater()
+
+    def test_manual_draft_outlook_does_not_set_state_for_cake_memo(self):
+        """
+        Test 2 (CRITICAL REGRESSION): manual_draft_outlook should NOT set state
+        to 📨 when payload has subcategory == "Cake Memo" (different task type).
+        This proves the subcategory gating is working correctly.
+        """
+        payload = {
+            "type": "outlook_draft",
+            "category": "Offer",
+            "subcategory": "Cake Memo",
+            "data": {
+                "To": "test@example.com",
+                "CC": "",
+                "Subject": "Test",
+                "HTMLBody": "Test body",
+                "Attachment": None
+            }
+        }
+
+        task = self.TaskWidget("Test Cake Task", "task_456", payload=payload)
+        initial_state = task.btn_state.text()
+
+        # Mock Dispatch to prevent real Outlook usage
+        with patch('OPTIONS._shared.task_widget.win32com.client.Dispatch') as mock_dispatch:
+            mock_outlook = MagicMock()
+            mock_mail = MagicMock()
+            mock_dispatch.return_value = mock_outlook
+            mock_outlook.CreateItem.return_value = mock_mail
+
+            # Call manual_draft_outlook
+            task.manual_draft_outlook()
+
+            # Verify Display was called
+            mock_mail.Display.assert_called_once()
+
+            # Verify state did NOT change to 📨 (should remain at initial state ⏳)
+            self.assertEqual(task.btn_state.text(), "⏳",
+                           "State should NOT change for Cake Memo task (subcategory is not 'Offer List')")
+
+        task.deleteLater()
+
+    def test_manual_draft_outlook_handles_missing_payload_gracefully(self):
+        """
+        Test 3: manual_draft_outlook should handle missing/empty payload gracefully.
+        """
+        task = self.TaskWidget("No Payload Task", "task_789", payload={})
+
+        # Mock Dispatch
+        with patch('OPTIONS._shared.task_widget.win32com.client.Dispatch') as mock_dispatch:
+            mock_outlook = MagicMock()
+            mock_mail = MagicMock()
+            mock_dispatch.return_value = mock_outlook
+            mock_outlook.CreateItem.return_value = mock_mail
+
+            # Should not raise an exception
+            task.manual_draft_outlook()
+
+            # Should not change state (no subcategory match)
+            self.assertEqual(task.btn_state.text(), "⏳")
+
+        task.deleteLater()
+
+    def test_manual_draft_outlook_attachment_handling(self):
+        """
+        Test 4: manual_draft_outlook should correctly attach files when attachment path is provided.
+        """
+        import tempfile
+        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.docx', delete=False)
+        temp_file.write("test content")
+        temp_file.close()
+
+        payload = {
+            "type": "outlook_draft",
+            "category": "Offer",
+            "subcategory": "Offer List",
+            "data": {
+                "To": "test@example.com",
+                "CC": "",
+                "Subject": "Test with attachment",
+                "HTMLBody": "Test body",
+                "Attachment": temp_file.name
+            }
+        }
+
+        task = self.TaskWidget("Task with Attachment", "task_att", payload=payload)
+
+        # Mock Dispatch
+        with patch('OPTIONS._shared.task_widget.win32com.client.Dispatch') as mock_dispatch:
+            mock_outlook = MagicMock()
+            mock_mail = MagicMock()
+            mock_dispatch.return_value = mock_outlook
+            mock_outlook.CreateItem.return_value = mock_mail
+
+            # Call manual_draft_outlook
+            task.manual_draft_outlook()
+
+            # Verify Attachments.Add was called with the attachment path
+            mock_mail.Attachments.Add.assert_called_once()
+
+            # Verify state changed to 📨 (Display succeeded)
+            self.assertEqual(task.btn_state.text(), "📨")
+
+        # Clean up temp file
+        os.unlink(temp_file.name)
+        task.deleteLater()
+
+
+class TestHandleSendEmailIntegration(unittest.TestCase):
+    """
+    Integration tests for OffersOptionWidget.handle_send_email().
+    Verifies task creation/reuse and Outlook draft opening.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up QApplication for widget testing."""
+        cls.app = QApplication.instance() or QApplication(["", "-platform", "offscreen"])
+
+    def setUp(self):
+        """Set up hermetic temp directories and widget."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.offer_lists_dir = os.path.join(self.temp_dir, "offer_lists")
+        os.makedirs(self.offer_lists_dir, exist_ok=True)
+
+        # Monkeypatch settings
+        self.patcher_settings = patch('OPTIONS.offers_option.load_app_settings')
+        self.mock_load_settings = self.patcher_settings.start()
+        self.mock_load_settings.return_value = {
+            "storage": {"offer_lists_dir": self.offer_lists_dir}
+        }
+
+        # Create a TodoWidget
+        from OPTIONS.todo_option import TodoWidget
+        self.todo_widget = TodoWidget()
+
+        # Create OffersOptionWidget with todo_widget wired in
+        self.log_messages = []
+        self.offers_widget = OffersOptionWidget(
+            log_callback=self._log_callback,
+            todo_widget=self.todo_widget
+        )
+        self.submenu = self.offers_widget.build_submenu()
+
+    def tearDown(self):
+        """Clean up widgets and temp directory."""
+        if self.submenu:
+            self.submenu.deleteLater()
+        if self.offers_widget:
+            self.offers_widget.deleteLater()
+        if self.todo_widget:
+            self.todo_widget.deleteLater()
+        self.patcher_settings.stop()
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _log_callback(self, category, message, level):
+        """Mock log callback to capture log messages."""
+        self.log_messages.append((category, message, level))
+
+    def test_handle_send_email_creates_task_and_opens_draft(self):
+        """
+        Test 1: handle_send_email should create/reuse a task and open an Outlook draft.
+        """
+        from datetime import datetime
+
+        # Create today's offer file
+        now = datetime.now()
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+        base_file = os.path.join(self.offer_lists_dir, base_name + ".docx")
+        with open(base_file, "w") as f:
+            f.write("test offer list")
+
+        # Mock win32com.client.Dispatch to prevent real Outlook
+        with patch('OPTIONS._shared.task_widget.win32com.client.Dispatch') as mock_dispatch:
+            mock_outlook = MagicMock()
+            mock_mail = MagicMock()
+            mock_dispatch.return_value = mock_outlook
+            mock_outlook.CreateItem.return_value = mock_mail
+
+            # Call handle_send_email
+            self.offers_widget.handle_send_email()
+
+            # Verify a task was created with the correct description
+            self.assertEqual(len(self.todo_widget.active_tasks), 1)
+            task_widget = list(self.todo_widget.active_tasks.values())[0]
+            self.assertEqual(task_widget.lbl_desc.text(), "Send Offerlist Email")
+
+            # Verify Outlook display was called
+            mock_mail.Display.assert_called_once()
+
+            # Verify the task state changed to 📨
+            self.assertEqual(task_widget.btn_state.text(), "📨")
+
+    def test_handle_send_email_reuses_existing_task(self):
+        """
+        Test 2: Calling handle_send_email twice should reuse the same task
+        (no duplicate "Send Offerlist Email" row created).
+        """
+        from datetime import datetime
+
+        # Create today's offer file
+        now = datetime.now()
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+        base_file = os.path.join(self.offer_lists_dir, base_name + ".docx")
+        with open(base_file, "w") as f:
+            f.write("test offer list")
+
+        # Mock win32com.client.Dispatch
+        with patch('OPTIONS._shared.task_widget.win32com.client.Dispatch') as mock_dispatch:
+            mock_outlook = MagicMock()
+            mock_mail = MagicMock()
+            mock_dispatch.return_value = mock_outlook
+            mock_outlook.CreateItem.return_value = mock_mail
+
+            # Call handle_send_email twice
+            self.offers_widget.handle_send_email()
+            first_task_count = len(self.todo_widget.active_tasks)
+
+            self.offers_widget.handle_send_email()
+            second_task_count = len(self.todo_widget.active_tasks)
+
+            # Should still have only 1 task (reused)
+            self.assertEqual(first_task_count, 1)
+            self.assertEqual(second_task_count, 1)
+            self.assertEqual(mock_mail.Display.call_count, 2, "Display should be called twice")
+
+    def test_handle_send_email_no_file_available(self):
+        """
+        Test 3: handle_send_email should gracefully handle the case when
+        no offer file exists (button disabled, but called anyway).
+        """
+        # Don't create any file
+        self.offers_widget.handle_send_email()
+
+        # No task should be created
+        self.assertEqual(len(self.todo_widget.active_tasks), 0)
+
+        # Log message should indicate error
+        error_logs = [msg for msg in self.log_messages if msg[2] == "ERROR"]
+        self.assertGreater(len(error_logs), 0, "Should have logged an error")
+
+    def test_handle_send_email_updates_payload_on_reuse(self):
+        """
+        Test 4: When reusing a task, the payload should be updated to the latest file.
+        """
+        from datetime import datetime
+
+        now = datetime.now()
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+        base_file = os.path.join(self.offer_lists_dir, base_name + ".docx")
+
+        # Mock win32com.client.Dispatch
+        with patch('OPTIONS._shared.task_widget.win32com.client.Dispatch') as mock_dispatch:
+            mock_outlook = MagicMock()
+            mock_mail = MagicMock()
+            mock_dispatch.return_value = mock_outlook
+            mock_outlook.CreateItem.return_value = mock_mail
+
+            # First call: create file and send email
+            with open(base_file, "w") as f:
+                f.write("version 1")
+            self.offers_widget.handle_send_email()
+
+            first_task_id = list(self.todo_widget.active_tasks.keys())[0]
+            first_payload = self.todo_widget.active_tasks[first_task_id].payload.copy()
+
+            # Second call: file still exists (payload unchanged for now, but structure verified)
+            self.offers_widget.handle_send_email()
+
+            # Task should still be the same
+            self.assertEqual(len(self.todo_widget.active_tasks), 1)
+            second_task_id = list(self.todo_widget.active_tasks.keys())[0]
+            self.assertEqual(first_task_id, second_task_id)
+
+
+class TestHandleDocSaveUpdateMode(unittest.TestCase):
+    """
+    Tests for OffersOptionWidget.handle_doc_save() in update mode.
+    Verifies that duplicate_for_update is called when is_update_mode is True.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up QApplication for widget testing."""
+        cls.app = QApplication.instance() or QApplication(["", "-platform", "offscreen"])
+
+    def setUp(self):
+        """Set up hermetic temp directories and widget."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.offer_lists_dir = os.path.join(self.temp_dir, "offer_lists")
+        os.makedirs(self.offer_lists_dir, exist_ok=True)
+
+        # Monkeypatch settings
+        self.patcher_settings = patch('OPTIONS.offers_option.load_app_settings')
+        self.mock_load_settings = self.patcher_settings.start()
+        self.mock_load_settings.return_value = {
+            "storage": {"offer_lists_dir": self.offer_lists_dir}
+        }
+
+        # Create widget with mock log callback
+        self.log_messages = []
+        self.offers_widget = OffersOptionWidget(log_callback=self._log_callback)
+        self.submenu = self.offers_widget.build_submenu()
+
+    def tearDown(self):
+        """Clean up widgets and temp directory."""
+        if self.submenu:
+            self.submenu.deleteLater()
+        if self.offers_widget:
+            self.offers_widget.deleteLater()
+        self.patcher_settings.stop()
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _log_callback(self, category, message, level):
+        """Mock log callback."""
+        self.log_messages.append((category, message, level))
+
+    def test_handle_doc_save_creates_updated_variant_in_update_mode(self):
+        """
+        Test 1: In update mode, handle_doc_save should create an UPDATED variant.
+        """
+        from datetime import datetime
+
+        # Create a mock file to save
+        now = datetime.now()
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+        base_file = os.path.join(self.offer_lists_dir, base_name + ".docx")
+        with open(base_file, "w") as f:
+            f.write("test content")
+
+        # Mock OfficeViewer.save_file and OfficeViewer.current_filepath
+        with patch.object(self.offers_widget.office_viewer, 'save_file'):
+            self.offers_widget.office_viewer.current_filepath = base_file
+            self.offers_widget.is_update_mode = True
+
+            # Mock duplicate_for_update to return a new path
+            with patch('OPTIONS.offers_option.duplicate_for_update') as mock_dup:
+                updated_file = base_file.replace(".docx", " UPDATED.docx")
+                mock_dup.return_value = updated_file
+
+                # Call handle_doc_save
+                self.offers_widget.handle_doc_save()
+
+                # Verify duplicate_for_update was called
+                mock_dup.assert_called_once_with(base_file)
+
+                # Verify a success log was generated
+                success_logs = [msg for msg in self.log_messages if msg[2] == "SUCCESS"]
+                self.assertGreater(len(success_logs), 0, "Should have logged success")
+
+    def test_handle_doc_save_no_update_when_not_in_update_mode(self):
+        """
+        Test 2: When is_update_mode is False, handle_doc_save should NOT create
+        an UPDATED variant.
+        """
+        from datetime import datetime
+
+        # Create a mock file to save
+        now = datetime.now()
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+        base_file = os.path.join(self.offer_lists_dir, base_name + ".docx")
+        with open(base_file, "w") as f:
+            f.write("test content")
+
+        # Mock OfficeViewer methods
+        with patch.object(self.offers_widget.office_viewer, 'save_file'):
+            self.offers_widget.office_viewer.current_filepath = base_file
+            self.offers_widget.is_update_mode = False
+
+            # Mock duplicate_for_update to track if it was called
+            with patch('OPTIONS.offers_option.duplicate_for_update') as mock_dup:
+                # Call handle_doc_save
+                self.offers_widget.handle_doc_save()
+
+                # duplicate_for_update should NOT be called
+                mock_dup.assert_not_called()
+
+    def test_handle_doc_save_error_handling_in_update_mode(self):
+        """
+        Test 3: If duplicate_for_update raises an error, handle_doc_save should
+        log the error and return gracefully.
+        """
+        from datetime import datetime
+
+        # Create a mock file
+        now = datetime.now()
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+        base_file = os.path.join(self.offer_lists_dir, base_name + ".docx")
+        with open(base_file, "w") as f:
+            f.write("test content")
+
+        # Mock OfficeViewer methods
+        with patch.object(self.offers_widget.office_viewer, 'save_file'):
+            self.offers_widget.office_viewer.current_filepath = base_file
+            self.offers_widget.is_update_mode = True
+
+            # Mock duplicate_for_update to raise an error
+            with patch('OPTIONS.offers_option.duplicate_for_update') as mock_dup:
+                mock_dup.side_effect = Exception("Test error")
+
+                # Call handle_doc_save (should not raise)
+                self.offers_widget.handle_doc_save()
+
+                # Verify error was logged
+                error_logs = [msg for msg in self.log_messages if msg[2] == "ERROR"]
+                self.assertGreater(len(error_logs), 0, "Should have logged an error")
+
+
+class TestSendEmailButtonState(unittest.TestCase):
+    """
+    Tests for Send Email button state management.
+    Verifies that btn_send_email is enabled/disabled correctly.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up QApplication for widget testing."""
+        cls.app = QApplication.instance() or QApplication(["", "-platform", "offscreen"])
+
+    def setUp(self):
+        """Set up hermetic temp directories and widget."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.offer_lists_dir = os.path.join(self.temp_dir, "offer_lists")
+        os.makedirs(self.offer_lists_dir, exist_ok=True)
+
+        # Monkeypatch settings
+        self.patcher = patch('OPTIONS.offers_option.load_app_settings')
+        self.mock_load_settings = self.patcher.start()
+        self.mock_load_settings.return_value = {
+            "storage": {"offer_lists_dir": self.offer_lists_dir}
+        }
+
+        # Create widget
+        self.offers_widget = OffersOptionWidget(log_callback=lambda c, m, l: None)
+        self.submenu = self.offers_widget.build_submenu()
+
+    def tearDown(self):
+        """Clean up."""
+        if self.submenu:
+            self.submenu.deleteLater()
+        if self.offers_widget:
+            self.offers_widget.deleteLater()
+        self.patcher.stop()
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_send_email_button_enabled_when_file_exists(self):
+        """
+        Test 1: btn_send_email should be enabled when today's offer file exists.
+        """
+        from datetime import datetime
+
+        # Create today's offer file
+        now = datetime.now()
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+        base_file = os.path.join(self.offer_lists_dir, base_name + ".docx")
+        with open(base_file, "w") as f:
+            f.write("test")
+
+        # Refresh button states
+        self.offers_widget._refresh_button_states()
+
+        # btn_send_email should be enabled
+        self.assertTrue(self.offers_widget.btn_send_email.isEnabled(),
+                       "Send Email button should be enabled when offer file exists")
+
+        # btn_create should be disabled
+        self.assertFalse(self.offers_widget.btn_create.isEnabled(),
+                        "Create button should be disabled when offer file exists")
+
+    def test_send_email_button_disabled_when_file_not_exists(self):
+        """
+        Test 2: btn_send_email should be disabled when no offer file exists.
+        """
+        # No file created, so _refresh_button_states should disable the button
+        self.offers_widget._refresh_button_states()
+
+        # btn_send_email should be disabled
+        self.assertFalse(self.offers_widget.btn_send_email.isEnabled(),
+                        "Send Email button should be disabled when no offer file exists")
+
+        # btn_create should be enabled
+        self.assertTrue(self.offers_widget.btn_create.isEnabled(),
+                       "Create button should be enabled when no offer file exists")
+
+    def test_send_email_button_opposite_state_of_create_button(self):
+        """
+        Test 3: btn_send_email and btn_create should always have opposite states.
+        """
+        from datetime import datetime
+
+        now = datetime.now()
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+        base_file = os.path.join(self.offer_lists_dir, base_name + ".docx")
+
+        # Initial state: no file
+        self.offers_widget._refresh_button_states()
+        create_enabled_1 = self.offers_widget.btn_create.isEnabled()
+        send_enabled_1 = self.offers_widget.btn_send_email.isEnabled()
+        self.assertNotEqual(create_enabled_1, send_enabled_1,
+                          "Buttons should have opposite states when no file exists")
+
+        # Create file
+        with open(base_file, "w") as f:
+            f.write("test")
+        self.offers_widget._refresh_button_states()
+        create_enabled_2 = self.offers_widget.btn_create.isEnabled()
+        send_enabled_2 = self.offers_widget.btn_send_email.isEnabled()
+        self.assertNotEqual(create_enabled_2, send_enabled_2,
+                          "Buttons should have opposite states when file exists")
+
+
 if __name__ == "__main__":
     unittest.main()

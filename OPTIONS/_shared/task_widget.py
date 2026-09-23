@@ -14,7 +14,7 @@ class TaskWidget(QWidget):
         self.task_id = task_id
         self.state_change_callback = state_change_callback
         self.payload = payload or {}
-        self.states = ["⏳", "❌", "✅", "➖"]
+        self.states = ["⏳", "❌", "✅", "➖", "📨"]
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
@@ -52,6 +52,8 @@ class TaskWidget(QWidget):
                 mail.Attachments.Add(os.path.abspath(attachment))
 
             mail.Display()
+            if self.payload.get("subcategory") == "Offer List":
+                self.set_state("📨")
         except Exception as e:
             print(f"Failed to draft outlook email: {e}")
 

@@ -81,7 +81,7 @@ class GuestRelationApp(QMainWindow):
         self.plot_widget = PlotViewerWidget()
         self.moves_widget = MovesWidget()
         self.todo_widget = TodoWidget(log_callback=log_cb)
-        self.offers_widget = OffersOptionWidget(log_callback=log_cb)
+        self.offers_widget = OffersOptionWidget(log_callback=log_cb, todo_widget=self.todo_widget)
         self.allergies_widget = AllergiesWidget()
         self.cake_widget = CakeMemoOptionWidget(log_callback=log_cb)
         self.booking_widget = BookingCallsOptionWidget(log_callback=log_cb)
@@ -105,7 +105,6 @@ class GuestRelationApp(QMainWindow):
 
         # Route generated tasks to TodoWidget
         self.cake_widget.task_generated.connect(self.todo_widget.add_task_auto)
-        self.offers_widget.task_generated.connect(self.todo_widget.add_task_auto)
 
         # -----------------------------------------------------------------
         # Sidebar setup

@@ -56,6 +56,18 @@ class TodoWidget(QWidget):
         self.add_task(task_id, description, payload)
         return task_id
 
+    def get_or_create_task(self, description: str, payload: dict = None) -> str:
+        """
+        Finds an existing task whose description matches exactly and reuses it
+        (updating its payload to the latest), instead of creating a duplicate.
+        Falls back to add_task_auto if no match exists.
+        """
+        for task_id, task_widget in self.active_tasks.items():
+            if task_widget.lbl_desc.text() == description:
+                task_widget.payload = payload or {}
+                return task_id
+        return self.add_task_auto(description, payload)
+
     def _handle_task_state_change(self, state: str, task_id: str, desc: str) -> None:
         """Handle task state transitions."""
         try:
