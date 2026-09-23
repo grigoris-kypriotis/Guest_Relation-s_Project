@@ -21,7 +21,9 @@ from MODULES.offers_module import (
     execute_offers_pipeline,
     write_arrival_record,
     get_last_record_failures,
+    classify_order,
 )
+from MODULES.offers.keyword_rules import classify_order as classify_order_direct
 from MODULES.common import paths_config
 
 
@@ -34,7 +36,7 @@ def create_synthetic_beach_csv(file_path: str) -> str:
       - Anniversary celebration (HB)
       - Birthday greeting (HB)
       - VIP Welcome (HB)
-      - Complimentary Fruit (ST)
+      - Fruit and wine package (ST)
       - Standard room without special offer
     """
     with open(file_path, mode="w", encoding="utf-8-sig", newline="") as f:
@@ -60,9 +62,9 @@ def create_synthetic_beach_csv(file_path: str) -> str:
         writer.writerow(["1404", "Guest Delta", "20/09/2026", "30/09/2026", "HOTELBEDS", "BK004", "2", "0"])
         writer.writerow(["VIP 2 Guest Welcome"])
 
-        # Row 5: Fruit -> Order: ST (3 adults)
+        # Row 5: Fruit and wine -> Order: ST (3 adults)
         writer.writerow(["1505", "Guest Epsilon", "20/09/2026", "01/10/2026", "ALLTOURS", "BK005", "3", "0"])
-        writer.writerow(["Fruit basket on arrival"])
+        writer.writerow(["Fruit and wine on arrival"])
 
         # Row 6: Non-order room (standard, 2 adults)
         writer.writerow(["1606", "Guest Zeta", "20/09/2026", "02/10/2026", "TUI", "BK006", "2", "0"])
@@ -110,9 +112,9 @@ def create_synthetic_shifted_block_csv(file_path: str) -> str:
         writer.writerow(["7101", "", "Booking Guest", "20/09/2026", "27/09/2026", "BOOKING.COM", "BK002", "2", "1"])
         writer.writerow(["Booking.com in shifted block"])
 
-        # Fruit basket in shifted block: should still be detected and classified as ST
+        # Fruit and wine in shifted block: should still be detected and classified as ST
         writer.writerow(["7202", "", "Fruit Guest", "20/09/2026", "29/09/2026", "ALLTOURS", "BK003", "2", "0"])
-        writer.writerow(["Fruit basket on arrival"])
+        writer.writerow(["Fruit and wine on arrival"])
 
     return file_path
 
@@ -580,6 +582,175 @@ class TestArrivalRecordWriter(unittest.TestCase):
         finally:
             om.ARRIVALS_FOLDER = orig_arrivals
             om.FINAL_FOLDER = orig_final
+
+
+class TestKeywordClassification(unittest.TestCase):
+    """
+    Unit tests for classify_order() function in keyword_rules module.
+    Tests keyword matching for HB (Half Board) and ST (Special Treatment) classifications.
+    """
+
+    def test_repeater_classification_lowercase(self):
+        """Test that 'repeater' keyword classifies as HB."""
+        result = classify_order_direct("repeater")
+        self.assertEqual(result, "HB")
+
+    def test_repeater_classification_mixedcase(self):
+        """Test that 'Repeater' keyword (mixed case) classifies as HB."""
+        result = classify_order_direct("Repeater guest, welcome back")
+        self.assertEqual(result, "HB")
+
+    def test_anniversary_classification(self):
+        """Test that 'Anniversary' keyword classifies as HB."""
+        result = classify_order_direct("Anniversary celebration cake requested")
+        self.assertEqual(result, "HB")
+
+    def test_birthday_classification(self):
+        """Test that 'Birthday' keyword classifies as HB."""
+        result = classify_order_direct("Birthday greeting card")
+        self.assertEqual(result, "HB")
+
+    def test_honeymoon_classification(self):
+        """Test that 'Honeymoon' keyword classifies as HB."""
+        result = classify_order_direct("Honeymoon couple special treatment")
+        self.assertEqual(result, "HB")
+
+    def test_brthd_abbreviation_classification(self):
+        """Test that 'Brthd' abbreviation classifies as HB."""
+        result = classify_order_direct("Brthd Gift wrapped")
+        self.assertEqual(result, "HB")
+
+    def test_vip_classification(self):
+        """Test that 'VIP' keyword classifies as HB."""
+        result = classify_order_direct("VIP 2 Guest Welcome")
+        self.assertEqual(result, "HB")
+
+    def test_fruit_and_wine_with_and(self):
+        """Test that 'fruit and wine' phrase classifies as ST."""
+        result = classify_order_direct("Fruit and wine on arrival")
+        self.assertEqual(result, "ST")
+
+    def test_fruit_and_wine_with_ampersand(self):
+        """Test that 'Fruit & Wine' phrase classifies as ST."""
+        result = classify_order_direct("Fruit & Wine on arrival")
+        self.assertEqual(result, "ST")
+
+    def test_fruit_and_wine_no_connector(self):
+        """Test that 'fruit wine' phrase (no connector) classifies as ST."""
+        result = classify_order_direct("fruit wine basket")
+        self.assertEqual(result, "ST")
+
+    def test_fruit_and_wine_mixed_case(self):
+        """Test that 'Fruit AND Wine' (uppercase connector) classifies as ST."""
+        result = classify_order_direct("Fruit AND Wine welcome package")
+        self.assertEqual(result, "ST")
+
+    def test_bare_fruit_no_match(self):
+        """
+        REGRESSION TEST: Plain 'Fruit basket on arrival' (no 'wine') must NOT match.
+        This is the key regression proof that the old bare-Fruit bug is fixed.
+        """
+        result = classify_order_direct("Fruit basket on arrival")
+        self.assertIsNone(result, "Bare 'Fruit' without 'wine' should NOT classify as ST anymore")
+
+    def test_fruit_only_lowercase(self):
+        """Test that bare 'fruit' alone (no wine) does not classify."""
+        result = classify_order_direct("Fruit bowl in room")
+        self.assertIsNone(result)
+
+    def test_no_keyword_match(self):
+        """Test that description with no keywords returns None."""
+        result = classify_order_direct("Room inspection passed, quiet room request")
+        self.assertIsNone(result)
+
+    def test_empty_description(self):
+        """Test that empty description returns None."""
+        result = classify_order_direct("")
+        self.assertIsNone(result)
+
+    def test_none_description(self):
+        """Test that None description returns None."""
+        result = classify_order_direct(None)
+        self.assertIsNone(result)
+
+    def test_hb_precedence_over_st(self):
+        """
+        Test that if a description matches both HB and ST keywords,
+        HB takes precedence (checked first, so HB returned).
+        """
+        # This is unlikely in real data, but the function should be predictable
+        result = classify_order_direct("VIP repeater with Fruit and wine treatment")
+        self.assertEqual(result, "HB", "HB keywords should take precedence when both match")
+
+    def test_fruit_wine_with_extra_spaces(self):
+        """Test that 'fruit  and  wine' with extra spaces still matches."""
+        result = classify_order_direct("Fruit   and   wine package")
+        self.assertEqual(result, "ST")
+
+
+class TestKeywordClassificationIntegration(unittest.TestCase):
+    """
+    Integration tests verifying classify_order works correctly through the full pipeline.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_repeater_through_extract_excel_data(self):
+        """Integration test: 'repeater' remark should result in HB classification through extract_excel_data."""
+        csv_path = os.path.join(self.temp_dir, "repeater_test.csv")
+        with open(csv_path, mode="w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f, delimiter=";")
+            writer.writerow(["Δωμάτιο", "Πελάτης", "Άφιξη", "Αναχώρηση", "Χρεώστης", "Αρ.", "Ενήλικες", "Παιδιά"])
+            writer.writerow(["2001", "Repeater Guest", "20/09/2026", "25/09/2026", "TUI", "BK001", "2", "0"])
+            writer.writerow(["Repeater guest, welcome back"])
+
+        offer_rows, _, all_arrivals = extract_excel_data(csv_path)
+
+        # Should have one offer row classified as HB
+        self.assertEqual(len(offer_rows), 1)
+        self.assertEqual(offer_rows[0]["Order"], "HB")
+        self.assertEqual(offer_rows[0]["RoomNo"], "2001")
+
+    def test_fruit_wine_through_extract_excel_data(self):
+        """Integration test: 'fruit and wine' remark should result in ST classification through extract_excel_data."""
+        csv_path = os.path.join(self.temp_dir, "fruit_wine_test.csv")
+        with open(csv_path, mode="w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f, delimiter=";")
+            writer.writerow(["Δωμάτιο", "Πελάτης", "Άφιξη", "Αναχώρηση", "Χρεώστης", "Αρ.", "Ενήλικες", "Παιδιά"])
+            writer.writerow(["3002", "Wine Guest", "20/09/2026", "26/09/2026", "HOTELBEDS", "BK002", "1", "0"])
+            writer.writerow(["Fruit & Wine welcome package"])
+
+        offer_rows, _, all_arrivals = extract_excel_data(csv_path)
+
+        # Should have one offer row classified as ST
+        self.assertEqual(len(offer_rows), 1)
+        self.assertEqual(offer_rows[0]["Order"], "ST")
+        self.assertEqual(offer_rows[0]["RoomNo"], "3002")
+
+    def test_bare_fruit_does_not_match_through_pipeline(self):
+        """
+        Integration test: 'Fruit basket on arrival' (no wine) should NOT be classified as ST.
+        This confirms the regression test at the pipeline level.
+        """
+        csv_path = os.path.join(self.temp_dir, "bare_fruit_test.csv")
+        with open(csv_path, mode="w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.writer(f, delimiter=";")
+            writer.writerow(["Δωμάτιο", "Πελάτης", "Άφιξη", "Αναχώρηση", "Χρεώστης", "Αρ.", "Ενήλικες", "Παιδιά"])
+            writer.writerow(["4003", "Bare Fruit Guest", "20/09/2026", "27/09/2026", "TUI", "BK003", "2", "0"])
+            writer.writerow(["Fruit basket on arrival"])
+
+        offer_rows, _, all_arrivals = extract_excel_data(csv_path)
+
+        # Should have NO offer rows (bare fruit doesn't match anymore)
+        self.assertEqual(len(offer_rows), 0,
+                        "Bare 'Fruit basket' with no wine should not be classified as ST anymore")
+        # But the arrival should still be recorded in all_arrivals
+        self.assertEqual(len(all_arrivals), 1)
+        self.assertEqual(all_arrivals[0]["room_number"], "4003")
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ from MODULES.parsing.inhouse_parser import (
     ARRIVAL_KEYS,
     DEPARTURE_KEYS,
 )
+from MODULES.offers.keyword_rules import classify_order
 
 
 def identify_digit_type(file_path):
@@ -152,11 +153,7 @@ def extract_excel_data(csv_path) -> Tuple[List[Dict[str, Any]], List, List[Dict[
                         pax += int(re.sub(r'\D', '', children_text))
 
         # Classify order by keywords
-        order_str = None
-        if re.search(r"(?i)Anniversary|Birthday|Honeymoon|Brthd|VIP", desc):
-            order_str = "HB"
-        elif re.search(r"(?i)Fruit", desc):
-            order_str = "ST"
+        order_str = classify_order(desc)
 
         # Handle Booking.com branch
         if is_booking:

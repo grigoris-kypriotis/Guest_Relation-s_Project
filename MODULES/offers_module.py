@@ -32,6 +32,11 @@ from MODULES.offers.csv_parser import (
     extract_excel_data,
 )
 
+# Re-export keyword classification from MODULES.offers.keyword_rules
+from MODULES.offers.keyword_rules import (
+    classify_order,
+)
+
 # Re-export record writing functions from MODULES.offers.records
 from MODULES.offers.records import (
     write_arrival_record,
@@ -58,6 +63,7 @@ __all__ = [
     "log_task",
     "identify_digit_type",
     "extract_excel_data",
+    "classify_order",
     "write_arrival_record",
     "duplicate_for_update",
     "get_todays_offer_list",
