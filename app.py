@@ -117,64 +117,8 @@ class GuestRelationApp(QMainWindow):
         self.btn_todo = QPushButton("To Do List")
         self.btn_offers = QPushButton("OFFERS")
 
-        # Sub-Menu for OFFERS
-        self.offers_submenu = QWidget()
-        offers_submenu_layout = QVBoxLayout(self.offers_submenu)
-        offers_submenu_layout.setContentsMargins(0, 4, 0, 6)
-        offers_submenu_layout.setSpacing(5)
-        self.offers_submenu.setStyleSheet("""
-            QWidget { background-color: transparent; }
-            QPushButton {
-                background-color: #FFE4E1;
-                border: 1px solid #FFB6C1;
-                border-radius: 4px;
-                padding: 7px 10px 7px 20px;
-                text-align: left;
-                font-size: 11px;
-                font-weight: bold;
-                color: black;
-                margin-bottom: 2px;
-            }
-            QPushButton:hover { background-color: #FF69B4; color: white; }
-        """)
-
-        self.offers_btn_create = QPushButton("Create Offerlist")
-        self.offers_btn_update = QPushButton("UPDATE Offerlist")
-        self.btn_save = QPushButton("SAVE")
-        self.btn_close = QPushButton("CLOSE")
-        self.btn_save_close = QPushButton("SAVE & CLOSE")
-
-        blue_sub_style = """
-            QPushButton {
-                background-color: #B0E0E6;
-                border: 1px solid #4682B4;
-                border-radius: 4px;
-                padding: 7px 10px 7px 20px;
-                text-align: left;
-                font-size: 11px;
-                font-weight: bold;
-                color: #0F3460;
-                margin-bottom: 2px;
-            }
-            QPushButton:hover { background-color: #4682B4; color: white; }
-        """
-        self.btn_save.setStyleSheet(blue_sub_style)
-        self.btn_close.setStyleSheet(blue_sub_style)
-        self.btn_save_close.setStyleSheet(blue_sub_style)
-
-        self.offers_btn_create.clicked.connect(self.offers_widget.run_offers_creation)
-        self.offers_btn_update.clicked.connect(self.offers_widget.run_offers_update)
-        self.btn_save.clicked.connect(self.offers_widget.handle_doc_save)
-        self.btn_close.clicked.connect(self.offers_widget.handle_doc_close)
-        self.btn_save_close.clicked.connect(self.offers_widget.handle_doc_save_and_close)
-
-        offers_submenu_layout.addWidget(self.offers_btn_create)
-        offers_submenu_layout.addWidget(self.offers_btn_update)
-        offers_submenu_layout.addSpacing(14)
-        offers_submenu_layout.addWidget(self.btn_save)
-        offers_submenu_layout.addWidget(self.btn_close)
-        offers_submenu_layout.addWidget(self.btn_save_close)
-        self.offers_submenu.hide()
+        # Build OFFERS submenu
+        self.offers_submenu = self.offers_widget.build_submenu()
 
         self.btn_allergies = QPushButton("ALLERGIES")
         self.btn_cake = QPushButton("CAKE MEMOS")
@@ -191,6 +135,20 @@ class GuestRelationApp(QMainWindow):
         self.btn_cake_close = QPushButton("CLOSE")
         self.btn_cake_save_close = QPushButton("SAVE & CLOSE (Outlook Draft)")
 
+        blue_sub_style = """
+            QPushButton {
+                background-color: #B0E0E6;
+                border: 1px solid #4682B4;
+                border-radius: 4px;
+                padding: 7px 10px 7px 20px;
+                text-align: left;
+                font-size: 11px;
+                font-weight: bold;
+                color: #0F3460;
+                margin-bottom: 2px;
+            }
+            QPushButton:hover { background-color: #4682B4; color: white; }
+        """
         self.btn_cake_save.setStyleSheet(blue_sub_style)
         self.btn_cake_close.setStyleSheet(blue_sub_style)
         self.btn_cake_save_close.setStyleSheet(blue_sub_style)

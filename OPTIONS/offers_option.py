@@ -9,7 +9,7 @@ import os
 from typing import Optional, Callable
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QFrame, QFileDialog, QMessageBox
+    QWidget, QVBoxLayout, QLabel, QFrame, QFileDialog, QMessageBox, QPushButton
 )
 from PyQt6.QtCore import pyqtSignal
 
@@ -205,3 +205,65 @@ class OffersOptionWidget(QWidget):
     def activate(self) -> None:
         """Called when this option is selected from the menu."""
         pass  # Offers view is stateful — no auto-refresh needed
+
+    def build_submenu(self) -> QWidget:
+        """Constructs the OFFERS sidebar submenu, wires its buttons to this widget's own handlers, and returns it."""
+        submenu = QWidget()
+        submenu_layout = QVBoxLayout(submenu)
+        submenu_layout.setContentsMargins(0, 4, 0, 6)
+        submenu_layout.setSpacing(5)
+        submenu.setStyleSheet("""
+            QWidget { background-color: transparent; }
+            QPushButton {
+                background-color: #FFE4E1;
+                border: 1px solid #FFB6C1;
+                border-radius: 4px;
+                padding: 7px 10px 7px 20px;
+                text-align: left;
+                font-size: 11px;
+                font-weight: bold;
+                color: black;
+                margin-bottom: 2px;
+            }
+            QPushButton:hover { background-color: #FF69B4; color: white; }
+        """)
+
+        self.btn_create = QPushButton("Create Offerlist")
+        self.btn_update = QPushButton("UPDATE Offerlist")
+        self.btn_save = QPushButton("SAVE")
+        self.btn_close = QPushButton("CLOSE")
+        self.btn_save_close = QPushButton("SAVE & CLOSE")
+
+        blue_sub_style = """
+            QPushButton {
+                background-color: #B0E0E6;
+                border: 1px solid #4682B4;
+                border-radius: 4px;
+                padding: 7px 10px 7px 20px;
+                text-align: left;
+                font-size: 11px;
+                font-weight: bold;
+                color: #0F3460;
+                margin-bottom: 2px;
+            }
+            QPushButton:hover { background-color: #4682B4; color: white; }
+        """
+        self.btn_save.setStyleSheet(blue_sub_style)
+        self.btn_close.setStyleSheet(blue_sub_style)
+        self.btn_save_close.setStyleSheet(blue_sub_style)
+
+        self.btn_create.clicked.connect(self.run_offers_creation)
+        self.btn_update.clicked.connect(self.run_offers_update)
+        self.btn_save.clicked.connect(self.handle_doc_save)
+        self.btn_close.clicked.connect(self.handle_doc_close)
+        self.btn_save_close.clicked.connect(self.handle_doc_save_and_close)
+
+        submenu_layout.addWidget(self.btn_create)
+        submenu_layout.addWidget(self.btn_update)
+        submenu_layout.addSpacing(14)
+        submenu_layout.addWidget(self.btn_save)
+        submenu_layout.addWidget(self.btn_close)
+        submenu_layout.addWidget(self.btn_save_close)
+        submenu.hide()
+
+        return submenu
