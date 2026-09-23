@@ -4,7 +4,6 @@ Pipeline functions for offer list generation and management.
 
 import os
 import glob
-import csv
 import re
 import shutil
 import traceback
@@ -12,87 +11,7 @@ from datetime import datetime
 
 from MODULES.offers.document import generate_word_document
 from MODULES.offers import paths as paths_module
-
-
-def identify_digit_type(file_path):
-    """
-    Identify if a CSV's first column contains 3-digit or 4-digit room numbers.
-
-    Args:
-        file_path: Path to the CSV file
-
-    Returns:
-        3 if 3-digit rooms found, 4 if 4-digit rooms found, 0 otherwise
-    """
-    with open(file_path, mode='r', encoding='utf-8-sig', errors='ignore') as f:
-        reader = csv.reader(f, delimiter=';')
-        for i, row in enumerate(reader):
-            if i >= 50: break
-            if not row: continue
-            col_a = row[0].strip(' "\'')
-            if len(col_a) == 3 and col_a.isdigit(): return 3
-            if len(col_a) == 4 and col_a.isdigit(): return 4
-    return 0
-
-
-def extract_excel_data(csv_path):
-    """
-    Extract offer-relevant data from a CSV arrivals file.
-
-    Currently uses fixed-column indexing. Returns data for rows that match
-    Booking.com or specific keywords in the remarks.
-
-    Args:
-        csv_path: Path to the CSV file
-
-    Returns:
-        Tuple of (extracted_data, minibar_data) where extracted_data is a list
-        of dicts with keys: RoomNo, DepDate, Pax, Order
-    """
-    csv_path = os.path.abspath(csv_path)
-    extracted_data = []
-
-    with open(csv_path, mode='r', encoding='utf-8-sig', errors='ignore') as f:
-        rows = list(csv.reader(f, delimiter=';'))
-
-    row_count = len(rows)
-    for r in range(row_count):
-        row = rows[r]
-        next_row = rows[r + 1] if (r + 1) < row_count else []
-
-        col_a = row[0].strip() if len(row) > 0 else ""
-        col_e_text = row[4].strip() if len(row) > 4 else ""
-        col_i = row[8].strip() if len(row) > 8 else ""
-        desc = next_row[0].strip() if len(next_row) > 0 else ""
-        dep_date = ""
-
-        if col_e_text:
-            date_match = re.search(r"(\d{1,2})[\/\-\.](\d{1,2})", col_e_text)
-            if date_match:
-                dep_date = f"{int(date_match.group(1)):02d}/{int(date_match.group(2)):02d}"
-            else:
-                dep_date = col_e_text.strip()
-
-        is_booking = bool(re.search(r"(?i)BOOKING\.COM", col_i))
-        is_room = bool(re.match(r"^\d{3,4}$", col_a))
-
-        if is_booking:
-            room_no = col_a.split()[0] if (not is_room and col_a) else col_a
-            if not room_no: continue
-            pax = sum(int(re.sub(r'\D', '', row[c])) for c in range(9, min(15, len(row))) if re.search(r'\d', row[c]))
-            extracted_data.append({"RoomNo": room_no, "DepDate": dep_date, "Pax": pax, "Order": "ST"})
-
-        elif is_room:
-            if not col_a: continue
-            order_str = None
-            if re.search(r"(?i)Anniversary|Birthday|Honeymoon|Brthd|VIP", desc): order_str = "HB"
-            elif re.search(r"(?i)Fruit", desc): order_str = "ST"
-
-            if order_str:
-                pax = sum(int(re.sub(r'\D', '', row[c])) for c in range(9, min(15, len(row))) if re.search(r'\d', row[c]))
-                extracted_data.append({"RoomNo": col_a, "DepDate": dep_date, "Pax": pax, "Order": order_str})
-
-    return extracted_data, []
+from MODULES.offers.csv_parser import identify_digit_type, extract_excel_data
 
 
 def duplicate_for_update(file_path):
@@ -181,7 +100,7 @@ def execute_offers_pipeline(selected_csvs=None):
             return False, "CSV validation failed.", None
 
         beach_csv = csv_files[0]
-        beach_data, _ = extract_excel_data(beach_csv)
+        beach_data, _, all_arrivals = extract_excel_data(beach_csv)
         minibar_data = []
 
         beach_dir = os.path.abspath(os.path.join(facade.ARRIVALS_FOLDER, "SANDY BEACH"))

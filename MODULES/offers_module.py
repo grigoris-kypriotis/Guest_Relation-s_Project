@@ -26,10 +26,14 @@ from MODULES.offers.document import (
     generate_word_document,
 )
 
-# Re-export pipeline functions from MODULES.offers.pipeline
-from MODULES.offers.pipeline import (
+# Re-export CSV parsing functions from MODULES.offers.csv_parser
+from MODULES.offers.csv_parser import (
     identify_digit_type,
     extract_excel_data,
+)
+
+# Re-export pipeline functions from MODULES.offers.pipeline
+from MODULES.offers.pipeline import (
     duplicate_for_update,
     get_todays_offer_list,
     execute_offers_pipeline,
