@@ -32,11 +32,17 @@ from MODULES.offers.csv_parser import (
     extract_excel_data,
 )
 
+# Re-export record writing functions from MODULES.offers.records
+from MODULES.offers.records import (
+    write_arrival_record,
+)
+
 # Re-export pipeline functions from MODULES.offers.pipeline
 from MODULES.offers.pipeline import (
     duplicate_for_update,
     get_todays_offer_list,
     execute_offers_pipeline,
+    get_last_record_failures,
 )
 
 
@@ -52,8 +58,10 @@ __all__ = [
     "log_task",
     "identify_digit_type",
     "extract_excel_data",
+    "write_arrival_record",
     "duplicate_for_update",
     "get_todays_offer_list",
     "execute_offers_pipeline",
+    "get_last_record_failures",
     "generate_word_document",
 ]

@@ -5,12 +5,13 @@ Hermetic test suite exercising single-CSV processing, digit validation,
 Word document generation without COM/Outlook, and villa removal regression guards.
 """
 import csv
+import json
 import os
 import shutil
 import tempfile
 import unittest
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import MODULES.offers_module as om
 from MODULES.offers_module import (
@@ -18,7 +19,10 @@ from MODULES.offers_module import (
     identify_digit_type,
     generate_word_document,
     execute_offers_pipeline,
+    write_arrival_record,
+    get_last_record_failures,
 )
+from MODULES.common import paths_config
 
 
 def create_synthetic_beach_csv(file_path: str) -> str:
@@ -320,6 +324,262 @@ class TestOffersPipelineHermetic(unittest.TestCase):
         self.assertIsNone(path)
         # Verify the error message mentions today/date mismatch
         self.assertIn("today", msg.lower(), f"Error message should mention today's date: {msg}")
+
+
+class TestArrivalRecordWriter(unittest.TestCase):
+    """
+    Tests for the per-arrival JSON record writer (write_arrival_record).
+    Exercises idempotent creation, field merge logic, and room_moves filtering.
+    """
+
+    def setUp(self):
+        """Set up hermetic temp directory and monkeypatch RECORDS_DIR."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.records_dir = os.path.join(self.temp_dir, "records")
+        os.makedirs(self.records_dir, exist_ok=True)
+
+        # Monkeypatch paths_config.RECORDS_DIR for hermetic testing
+        self.orig_records_dir = paths_config.RECORDS_DIR
+        paths_config.RECORDS_DIR = self.records_dir
+
+    def tearDown(self):
+        """Restore original RECORDS_DIR and clean up temp directory."""
+        paths_config.RECORDS_DIR = self.orig_records_dir
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_record_created_with_correct_fields(self):
+        """
+        Test 1: A new record is created with all expected fields when
+        write_arrival_record is called with a fresh booking_id.
+        """
+        arrival = {
+            "booking_id": "BK001",
+            "room_number": "1101",
+            "guest_name": "Guest Alpha",
+            "arrival_date": "20/09",
+            "departure_date": "27/09",
+            "agency": "TUI",
+        }
+
+        write_arrival_record(arrival, hotel_state_manager=None)
+
+        # Verify the file was created
+        record_path = os.path.join(self.records_dir, "BK001.json")
+        self.assertTrue(os.path.exists(record_path), f"Record file should be created at {record_path}")
+
+        # Read and verify contents
+        with open(record_path, "r", encoding="utf-8") as f:
+            record = json.load(f)
+
+        self.assertEqual(record["booking_id"], "BK001")
+        self.assertEqual(record["room_number"], "1101")
+        self.assertEqual(record["guest_name"], "Guest Alpha")
+        self.assertEqual(record["arrival_date"], "20/09")
+        self.assertEqual(record["departure_date"], "27/09")
+        self.assertEqual(record["tour_operator"], "TUI")
+        self.assertEqual(record["room_moves"], [])
+        self.assertEqual(record["traces"], [])
+        # length_of_stay should be 7 (Sept 20-27)
+        self.assertEqual(record["length_of_stay"], 7)
+
+    def test_record_idempotent_rewrite(self):
+        """
+        Test 2: Re-running write_arrival_record for the SAME booking_id with
+        the same data doesn't duplicate or corrupt the file. Additionally,
+        if an existing file has extra fields (e.g., hand-added custom data),
+        they are preserved, and the traces field is never touched.
+        """
+        arrival = {
+            "booking_id": "BK002",
+            "room_number": "1202",
+            "guest_name": "Guest Beta",
+            "arrival_date": "21/09",
+            "departure_date": "28/09",
+            "agency": "HOTELBEDS",
+        }
+
+        # First write
+        write_arrival_record(arrival, hotel_state_manager=None)
+        record_path = os.path.join(self.records_dir, "BK002.json")
+
+        # Manually add extra fields (simulating manual edit)
+        with open(record_path, "r", encoding="utf-8") as f:
+            first_record = json.load(f)
+        first_record["custom_note"] = "hand-added field"
+        first_record["traces"] = [{"trace_id": "TR001", "notes": "manually set"}]
+        with open(record_path, "w", encoding="utf-8") as f:
+            json.dump(first_record, f, indent=2, ensure_ascii=False)
+
+        # Second write (should be idempotent)
+        write_arrival_record(arrival, hotel_state_manager=None)
+
+        # Verify file still exists and custom data is preserved
+        self.assertTrue(os.path.exists(record_path))
+        with open(record_path, "r", encoding="utf-8") as f:
+            second_record = json.load(f)
+
+        # Custom field should still be there
+        self.assertEqual(second_record.get("custom_note"), "hand-added field")
+        # Traces should be exactly as they were before (untouched)
+        self.assertEqual(
+            second_record.get("traces"),
+            [{"trace_id": "TR001", "notes": "manually set"}],
+            "Traces field should never be overwritten"
+        )
+
+    def test_room_moves_correctly_filtered(self):
+        """
+        Test 3: Room moves are correctly filtered by booking_id.
+        A mock HotelStateManager with multiple room move records is passed,
+        and only moves matching the current arrival's booking_id should be recorded.
+        """
+        arrival = {
+            "booking_id": "BK003",
+            "room_number": "1303",
+            "guest_name": "Guest Gamma",
+            "arrival_date": "22/09",
+            "departure_date": "29/09",
+            "agency": "TUI",
+        }
+
+        # Create a mock HotelStateManager
+        mock_hsm = MagicMock()
+        mock_hsm.load_room_moves_history.return_value = [
+            {"booking_id": "BK001", "old_room": "1101", "new_room": "1102", "date": "22/09"},
+            {"booking_id": "BK003", "old_room": "1303", "new_room": "1304", "date": "23/09"},
+            {"booking_id": "BK002", "old_room": "1202", "new_room": "1203", "date": "24/09"},
+            {"booking_id": "BK003", "old_room": "1304", "new_room": "1305", "date": "24/09"},
+        ]
+
+        write_arrival_record(arrival, hotel_state_manager=mock_hsm)
+
+        record_path = os.path.join(self.records_dir, "BK003.json")
+        with open(record_path, "r", encoding="utf-8") as f:
+            record = json.load(f)
+
+        # Should have exactly 2 moves for BK003
+        self.assertEqual(len(record["room_moves"]), 2)
+        # Verify both moves belong to BK003
+        for move in record["room_moves"]:
+            self.assertEqual(move["booking_id"], "BK003")
+        # Verify the moves are the correct ones
+        room_pairs = [(m["old_room"], m["new_room"]) for m in record["room_moves"]]
+        self.assertIn(("1303", "1304"), room_pairs)
+        self.assertIn(("1304", "1305"), room_pairs)
+
+    def test_empty_booking_id_skipped(self):
+        """
+        Test 4: An arrival with an empty or missing booking_id is skipped
+        gracefully without crashing the pipeline run.
+        """
+        # Arrival with empty booking_id
+        arrival_empty = {
+            "booking_id": "",
+            "room_number": "1404",
+            "guest_name": "Guest Delta",
+            "arrival_date": "23/09",
+            "departure_date": "30/09",
+            "agency": "HOTELBEDS",
+        }
+
+        # Should not raise an exception
+        try:
+            write_arrival_record(arrival_empty, hotel_state_manager=None)
+        except Exception as e:
+            self.fail(f"write_arrival_record should not crash on empty booking_id, but raised: {e}")
+
+        # Verify no file was created
+        files = os.listdir(self.records_dir)
+        self.assertEqual(len(files), 0, "No record file should be created for empty booking_id")
+
+        # Arrival with missing booking_id
+        arrival_missing = {
+            "room_number": "1405",
+            "guest_name": "Guest Epsilon",
+            "arrival_date": "24/09",
+            "departure_date": "01/10",
+            "agency": "TUI",
+        }
+
+        # Should also not raise an exception
+        try:
+            write_arrival_record(arrival_missing, hotel_state_manager=None)
+        except Exception as e:
+            self.fail(f"write_arrival_record should not crash on missing booking_id, but raised: {e}")
+
+        # Still no files
+        files = os.listdir(self.records_dir)
+        self.assertEqual(len(files), 0, "No record file should be created for missing booking_id")
+
+    def test_length_of_stay_calculation_year_crossing(self):
+        """
+        Test 5: Length of stay is correctly calculated for stays that cross
+        calendar year boundaries (e.g., arrival Dec 28, departure Jan 3).
+        """
+        arrival = {
+            "booking_id": "BK099",
+            "room_number": "9999",
+            "guest_name": "Year Crosser",
+            "arrival_date": "28/12",
+            "departure_date": "03/01",
+            "agency": "TUI",
+        }
+
+        write_arrival_record(arrival, hotel_state_manager=None)
+
+        record_path = os.path.join(self.records_dir, "BK099.json")
+        with open(record_path, "r", encoding="utf-8") as f:
+            record = json.load(f)
+
+        # Should be 6 nights (Dec 28, 29, 30, 31, Jan 1, 2)
+        self.assertEqual(record["length_of_stay"], 6,
+                        f"Year-crossing stay (Dec 28 - Jan 3) should be 6 nights, got {record['length_of_stay']}")
+
+    def test_arrival_record_integration_with_pipeline(self):
+        """
+        Test 6: Integration test verifying that execute_offers_pipeline
+        successfully writes arrival records for all entries in all_arrivals.
+        """
+        temp_arrivals = os.path.join(self.temp_dir, "arrivals")
+        temp_output = os.path.join(self.temp_dir, "output")
+        os.makedirs(temp_arrivals, exist_ok=True)
+        os.makedirs(temp_output, exist_ok=True)
+
+        # Monkeypatch module paths
+        orig_arrivals = om.ARRIVALS_FOLDER
+        orig_final = om.FINAL_FOLDER
+        om.ARRIVALS_FOLDER = temp_arrivals
+        om.FINAL_FOLDER = temp_output
+
+        try:
+            csv_path = os.path.join(self.temp_dir, "beach_arrivals.csv")
+            create_synthetic_beach_csv(csv_path)
+
+            ok, msg, path = execute_offers_pipeline(selected_csvs=[csv_path])
+            self.assertTrue(ok, f"Pipeline should succeed, but got: {msg}")
+
+            # Verify records were created for all arrivals (except those with empty booking_id)
+            created_files = os.listdir(self.records_dir)
+            # We expect records for BK001-BK006 (6 guests from synthetic CSV)
+            expected_bookings = {"BK001", "BK002", "BK003", "BK004", "BK005", "BK006"}
+            created_bookings = {f.replace(".json", "") for f in created_files}
+            self.assertEqual(created_bookings, expected_bookings,
+                           f"Expected records for {expected_bookings}, got {created_bookings}")
+
+            # Spot-check one record
+            bk001_path = os.path.join(self.records_dir, "BK001.json")
+            with open(bk001_path, "r", encoding="utf-8") as f:
+                bk001_record = json.load(f)
+            self.assertEqual(bk001_record["guest_name"], "Guest Alpha")
+            self.assertEqual(bk001_record["room_number"], "1101")
+
+            # Verify failure list is empty (no failures)
+            failures = get_last_record_failures()
+            self.assertEqual(len(failures), 0, f"Should have no record failures, but got: {failures}")
+
+        finally:
+            om.ARRIVALS_FOLDER = orig_arrivals
+            om.FINAL_FOLDER = orig_final
 
 
 if __name__ == "__main__":

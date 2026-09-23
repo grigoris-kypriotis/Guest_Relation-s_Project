@@ -17,6 +17,7 @@ from MODULES.offers_module import (
     execute_offers_pipeline, get_todays_offer_list,
     duplicate_for_update, ARRIVALS_FOLDER
 )
+from MODULES.offers.pipeline import get_last_record_failures
 from OPTIONS._shared_widgets import OfficeViewer
 
 
@@ -123,6 +124,12 @@ class OffersOptionWidget(QWidget):
 
             level = "SUCCESS" if pipeline_status else "ERROR"
             self._log(msg, level)
+
+            # Log individual record write failures if any
+            record_failures = get_last_record_failures()
+            for booking_id, error in record_failures:
+                self._log(f"Record write failed for booking {booking_id}: {error}", "ERROR")
+
             if pipeline_status and final_path:
                 self._log(f"Opening generated document in OfficeViewer: {os.path.basename(final_path)}")
                 self.office_viewer.open_file(final_path)

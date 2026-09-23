@@ -12,6 +12,18 @@ from datetime import datetime
 from MODULES.offers.document import generate_word_document
 from MODULES.offers import paths as paths_module
 from MODULES.offers.csv_parser import identify_digit_type, extract_excel_data
+from MODULES.offers.records import write_arrival_record
+from MODULES.state.hotel_state_manager import HotelStateManager
+
+# Module-level storage for last pipeline record write failures
+# Format: list of (booking_id, error_message) tuples
+_last_record_failures = []
+
+
+def get_last_record_failures():
+    """Return the list of record write failures from the last pipeline run."""
+    global _last_record_failures
+    return _last_record_failures.copy()
 
 
 def _get_file_creation_date(file_path: str):
@@ -144,7 +156,25 @@ def execute_offers_pipeline(selected_csvs=None):
                 counter += 1
 
         generate_word_document(all_data, minibar_data, today_docx, final_path, year_str)
-        return True, "Success: Pipeline complete.", final_path
+
+        # Write arrival records for each entry in all_arrivals (idempotent, non-blocking)
+        global _last_record_failures
+        _last_record_failures = []
+        hsm = HotelStateManager()
+        for arrival in all_arrivals:
+            try:
+                write_arrival_record(arrival, hsm)
+            except Exception as e:
+                booking_id = arrival.get("booking_id", "?")
+                _last_record_failures.append((booking_id, str(e)))
+
+        # Build success message, appending note if there were record failures
+        success_msg = "Success: Pipeline complete."
+        if _last_record_failures:
+            failure_count = len(_last_record_failures)
+            success_msg += f" ({failure_count} record write failures — see log)"
+
+        return True, success_msg, final_path
 
     except Exception as e:
         error_msg = f"Pipeline Error: {str(e)}\n\nTraceback:\n{traceback.format_exc()}"
