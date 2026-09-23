@@ -15,10 +15,11 @@ from PyQt6.QtCore import pyqtSignal
 
 from MODULES.offers_module import (
     execute_offers_pipeline, get_todays_offer_list,
-    duplicate_for_update, ARRIVALS_FOLDER
+    duplicate_for_update, resolve_todays_offer_file, ARRIVALS_FOLDER
 )
 from MODULES.offers.pipeline import get_last_record_failures
 from OPTIONS._shared_widgets import OfficeViewer
+from OPTIONS.configuration_option import load_app_settings
 
 
 class OffersOptionWidget(QWidget):
@@ -145,7 +146,9 @@ class OffersOptionWidget(QWidget):
             self._log("Searching for today's file...")
             self.repaint()
 
-            file_path = get_todays_offer_list()
+            # Read offer_lists_dir from settings
+            offer_lists_dir = load_app_settings().get("storage", {}).get("offer_lists_dir")
+            file_path = resolve_todays_offer_file(offer_lists_dir=offer_lists_dir)
             if file_path:
                 self._log(f"File located. Mode: UPDATE. Target: {os.path.basename(file_path)}", "SUCCESS")
                 self.office_viewer.open_file(file_path)

@@ -753,5 +753,213 @@ class TestKeywordClassificationIntegration(unittest.TestCase):
         self.assertEqual(all_arrivals[0]["room_number"], "4003")
 
 
+class TestResolveTodaysOfferFile(unittest.TestCase):
+    """
+    Tests for resolve_todays_offer_file() function.
+    Exercises deterministic UPDATED-variant selection (not mtime-based).
+    """
+
+    def setUp(self):
+        """Create hermetic temp directories for offer list tests."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.offer_lists_dir = os.path.join(self.temp_dir, "offer_lists")
+        os.makedirs(self.offer_lists_dir, exist_ok=True)
+
+        # Also set up monkeypatch for FINAL_FOLDER fallback tests
+        self.orig_final = om.FINAL_FOLDER
+        self.test_final_folder = os.path.join(self.temp_dir, "final_output")
+        os.makedirs(self.test_final_folder, exist_ok=True)
+        om.FINAL_FOLDER = self.test_final_folder
+
+    def tearDown(self):
+        """Restore FINAL_FOLDER and clean up temp directory."""
+        om.FINAL_FOLDER = self.orig_final
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_base_file_only(self):
+        """Test 1: Only the base file exists → base file resolved."""
+        from MODULES.offers_module import resolve_todays_offer_file
+        from datetime import datetime
+
+        now = datetime.now()
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')}).docx"
+        base_file = os.path.join(self.offer_lists_dir, base_name)
+
+        # Create the base file
+        with open(base_file, "w") as f:
+            f.write("test")
+
+        result = resolve_todays_offer_file(offer_lists_dir=self.offer_lists_dir)
+        self.assertEqual(result, base_file)
+
+    def test_base_and_updated(self):
+        """Test 2: Base + ' UPDATED' exist → UPDATED picked (not base)."""
+        from MODULES.offers_module import resolve_todays_offer_file
+        from datetime import datetime
+
+        now = datetime.now()
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+        base_file = os.path.join(self.offer_lists_dir, base_name + ".docx")
+        updated_file = os.path.join(self.offer_lists_dir, base_name + " UPDATED.docx")
+
+        # Create both files
+        with open(base_file, "w") as f:
+            f.write("base")
+        with open(updated_file, "w") as f:
+            f.write("updated")
+
+        result = resolve_todays_offer_file(offer_lists_dir=self.offer_lists_dir)
+        self.assertEqual(result, updated_file, "Should pick UPDATED over base")
+
+    def test_base_updated_updated_2(self):
+        """Test 3: Base + ' UPDATED' + ' UPDATED (2)' → ' UPDATED (2)' picked."""
+        from MODULES.offers_module import resolve_todays_offer_file
+        from datetime import datetime
+
+        now = datetime.now()
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+        base_file = os.path.join(self.offer_lists_dir, base_name + ".docx")
+        updated_file = os.path.join(self.offer_lists_dir, base_name + " UPDATED.docx")
+        updated_2_file = os.path.join(self.offer_lists_dir, base_name + " UPDATED (2).docx")
+
+        # Create all three files
+        with open(base_file, "w") as f:
+            f.write("base")
+        with open(updated_file, "w") as f:
+            f.write("updated")
+        with open(updated_2_file, "w") as f:
+            f.write("updated 2")
+
+        result = resolve_todays_offer_file(offer_lists_dir=self.offer_lists_dir)
+        self.assertEqual(result, updated_2_file, "Should pick highest UPDATED variant (2)")
+
+    def test_deterministic_not_mtime_based(self):
+        """
+        Test 4 (CRITICAL): Deliberately set mtimes OUT OF ORDER to prove
+        selection is NOT mtime-based.
+
+        Creates base, UPDATED (1), and UPDATED (2), then sets their mtimes
+        in reverse order (newest first), and verifies UPDATED (2) is still selected.
+        """
+        from MODULES.offers_module import resolve_todays_offer_file
+        from datetime import datetime
+
+        now = datetime.now()
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+        base_file = os.path.join(self.offer_lists_dir, base_name + ".docx")
+        updated_file = os.path.join(self.offer_lists_dir, base_name + " UPDATED.docx")
+        updated_2_file = os.path.join(self.offer_lists_dir, base_name + " UPDATED (2).docx")
+
+        # Create all three files
+        with open(base_file, "w") as f:
+            f.write("base")
+        with open(updated_file, "w") as f:
+            f.write("updated")
+        with open(updated_2_file, "w") as f:
+            f.write("updated 2")
+
+        # Now deliberately set mtimes OUT OF ORDER to prove the function doesn't use mtime
+        # Set UPDATED (2) to the OLDEST mtime (it should still be picked)
+        old_time = 1000000000  # Some timestamp in the past
+        current_time = 1000000100  # Slightly newer
+        newest_time = 1000000200  # Newest
+
+        os.utime(updated_2_file, (old_time, old_time))  # OLDEST
+        os.utime(updated_file, (current_time, current_time))  # MIDDLE
+        os.utime(base_file, (newest_time, newest_time))  # NEWEST
+
+        # Even though base_file has the newest mtime, UPDATED (2) should still be picked
+        result = resolve_todays_offer_file(offer_lists_dir=self.offer_lists_dir)
+        self.assertEqual(
+            result,
+            updated_2_file,
+            "Should pick UPDATED (2) by counter, NOT by newest mtime. "
+            "This proves the selection is counter-based, not mtime-based."
+        )
+
+    def test_no_files_return_none(self):
+        """Test 5: No files exist → returns None."""
+        from MODULES.offers_module import resolve_todays_offer_file
+
+        result = resolve_todays_offer_file(offer_lists_dir=self.offer_lists_dir)
+        self.assertIsNone(result, "Should return None when no files exist")
+
+    def test_explicit_offer_lists_dir_parameter(self):
+        """
+        Test 6: Test with explicit offer_lists_dir parameter (not FINAL_FOLDER fallback).
+        This confirms the parameter itself works correctly independent of fallback logic.
+        """
+        from MODULES.offers_module import resolve_todays_offer_file
+        from datetime import datetime
+
+        now = datetime.now()
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+        base_file = os.path.join(self.offer_lists_dir, base_name + ".docx")
+        updated_file = os.path.join(self.offer_lists_dir, base_name + " UPDATED.docx")
+
+        # Create both files
+        with open(base_file, "w") as f:
+            f.write("base")
+        with open(updated_file, "w") as f:
+            f.write("updated")
+
+        # Call with explicit offer_lists_dir parameter
+        result = resolve_todays_offer_file(offer_lists_dir=self.offer_lists_dir)
+        self.assertEqual(result, updated_file, "Should pick UPDATED when offer_lists_dir is provided")
+
+    def test_fallback_to_final_folder(self):
+        """
+        Test 7: When offer_lists_dir is None, fallback to FINAL_FOLDER logic.
+        """
+        from MODULES.offers_module import resolve_todays_offer_file
+        from datetime import datetime
+
+        now = datetime.now()
+        # Create the GR OFFERS {month}.{year} folder structure
+        month_year_folder = os.path.join(self.test_final_folder, f"GR OFFERS {now.month}.{now.year}")
+        os.makedirs(month_year_folder, exist_ok=True)
+
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+        base_file = os.path.join(month_year_folder, base_name + ".docx")
+        updated_file = os.path.join(month_year_folder, base_name + " UPDATED.docx")
+
+        # Create both files
+        with open(base_file, "w") as f:
+            f.write("base")
+        with open(updated_file, "w") as f:
+            f.write("updated")
+
+        # Call without offer_lists_dir (should use FINAL_FOLDER fallback)
+        result = resolve_todays_offer_file(offer_lists_dir=None)
+        self.assertEqual(result, updated_file, "Should pick UPDATED using FINAL_FOLDER fallback")
+
+    def test_multiple_updated_variants_highest_wins(self):
+        """
+        Test 8: Multiple UPDATED variants exist → highest counter is selected.
+        """
+        from MODULES.offers_module import resolve_todays_offer_file
+        from datetime import datetime
+
+        now = datetime.now()
+        base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+
+        # Create variants with different counters
+        files = {
+            os.path.join(self.offer_lists_dir, base_name + ".docx"): "base",
+            os.path.join(self.offer_lists_dir, base_name + " UPDATED.docx"): "updated 1",
+            os.path.join(self.offer_lists_dir, base_name + " UPDATED (2).docx"): "updated 2",
+            os.path.join(self.offer_lists_dir, base_name + " UPDATED (3).docx"): "updated 3",
+            os.path.join(self.offer_lists_dir, base_name + " UPDATED (5).docx"): "updated 5",
+        }
+
+        for filepath, content in files.items():
+            with open(filepath, "w") as f:
+                f.write(content)
+
+        result = resolve_todays_offer_file(offer_lists_dir=self.offer_lists_dir)
+        expected = os.path.join(self.offer_lists_dir, base_name + " UPDATED (5).docx")
+        self.assertEqual(result, expected, "Should pick UPDATED (5) as the highest counter")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,7 @@ import re
 import shutil
 import traceback
 from datetime import datetime
+from typing import Optional
 
 from MODULES.offers.document import generate_word_document
 from MODULES.offers import paths as paths_module
@@ -61,6 +62,73 @@ def duplicate_for_update(file_path):
 
     shutil.copy2(file_path, new_path)
     return new_path
+
+
+def resolve_todays_offer_file(offer_lists_dir: Optional[str] = None) -> Optional[str]:
+    """
+    Deterministically resolves today's offer list file, preferring the highest-numbered
+    ' UPDATED' variant over the base file when one exists — never by mtime (duplicate_for_update
+    uses shutil.copy2 which preserves source mtime, making mtime-based selection unreliable).
+
+    Args:
+        offer_lists_dir: Optional directory to search in. If None, falls back to today's
+                        FINAL_FOLDER-based logic (FINAL_FOLDER/GR OFFERS {month}.{year}).
+
+    Returns:
+        Path to today's offer file (preferring highest UPDATED variant), or None if not found.
+    """
+    from MODULES import offers_module as facade
+
+    now = datetime.now()
+
+    # Determine target folder
+    if offer_lists_dir is None:
+        # Fall back to original get_todays_offer_list logic
+        target_folder = os.path.abspath(os.path.join(facade.FINAL_FOLDER, f"GR OFFERS {now.month}.{now.year}"))
+    else:
+        target_folder = os.path.abspath(offer_lists_dir)
+
+    # Glob for today's files
+    base_name = f"OFFER LIST ({now.strftime('%Y-%m-%d')})"
+    search_pattern = os.path.abspath(os.path.join(target_folder, f"{base_name}*.docx"))
+    files = glob.glob(search_pattern)
+
+    if not files:
+        return None
+
+    # Partition into base vs UPDATED variants
+    base_file = None
+    updated_files = {}  # counter -> filepath mapping
+
+    for filepath in files:
+        filename = os.path.basename(filepath)
+
+        # Check if it's the exact base file
+        if filename == f"{base_name}.docx":
+            base_file = filepath
+        else:
+            # Check if it's an UPDATED variant
+            # Pattern: "OFFER LIST (YYYY-MM-DD) UPDATED.docx" or "OFFER LIST (YYYY-MM-DD) UPDATED (N).docx"
+            match = re.search(r' UPDATED(?: \((\d+)\))?\.docx$', filename)
+            if match:
+                counter_str = match.group(1)
+                counter = int(counter_str) if counter_str else 1
+                updated_files[counter] = filepath
+
+    # Prefer UPDATED variants by highest counter
+    if updated_files:
+        highest_counter = max(updated_files.keys())
+        return updated_files[highest_counter]
+
+    # Fall back to base file
+    if base_file:
+        return base_file
+
+    # Shouldn't normally reach here (since files list is not empty), but be defensive
+    if files:
+        return files[0]
+
+    return None
 
 
 def get_todays_offer_list():

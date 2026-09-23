@@ -44,6 +44,7 @@ from MODULES.offers.records import (
 
 # Re-export pipeline functions from MODULES.offers.pipeline
 from MODULES.offers.pipeline import (
+    resolve_todays_offer_file,
     duplicate_for_update,
     get_todays_offer_list,
     execute_offers_pipeline,
@@ -65,6 +66,7 @@ __all__ = [
     "extract_excel_data",
     "classify_order",
     "write_arrival_record",
+    "resolve_todays_offer_file",
     "duplicate_for_update",
     "get_todays_offer_list",
     "execute_offers_pipeline",
