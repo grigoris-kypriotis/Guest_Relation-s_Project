@@ -11,7 +11,6 @@ form UI, parsing) will depend on:
   - venue (str): one of VENUE_DISPLAY's keys (e.g., 'elia', 'il_gusto', 'room')
   - hour (int): 0-23
   - minute (int): 0-59
-  - is_pm (bool): if True, display as PM; if False, as AM
   - charge_state (str): one of CHARGE_PAID, CHARGE_PENDING, CHARGE_COMPLIMENTARY
   - complimentary_by (str): name of person authorizing complimentary charge (if applicable)
   - room_number (str): guest's room identifier
@@ -100,20 +99,21 @@ VENUE_DISPLAY = {
 }
 
 
-def compose_provided_at(venue_key: str, hour: int, minute: int, is_pm: bool) -> str:
+def compose_provided_at(venue_key: str, hour: int, minute: int) -> str:
     """
-    Compose PROVIDED_AT column from venue, hour, minute, and AM/PM flag.
+    Compose PROVIDED_AT column from venue, hour, and minute.
 
     Args:
         venue_key: one of VENUE_DISPLAY's keys (e.g., 'elia', 'il_gusto', 'room')
         hour: 0-23 (will be formatted as-is in the time string)
         minute: 0-59 (will be formatted as-is in the time string)
-        is_pm: if True, append "PM"; if False, append "AM"
 
     Returns:
         Composed string, e.g. "IL GUSTO 19.30PM" (confirmed real example) or "19.30PM" for room venue.
+        AM/PM suffix is derived automatically from hour (is_pm = hour >= 12).
         Always strips trailing/leading whitespace.
     """
+    is_pm = hour >= 12
     ampm = "PM" if is_pm else "AM"
     venue_display = VENUE_DISPLAY[venue_key]
     time_part = f"{hour:02d}.{minute:02d}{ampm}"
@@ -123,36 +123,37 @@ def compose_provided_at(venue_key: str, hour: int, minute: int, is_pm: bool) -> 
     return time_part.strip()
 
 
-def parse_provided_at(text: str) -> Tuple[Optional[str], Optional[int], Optional[int], Optional[bool]]:
+def parse_provided_at(text: str) -> Tuple[Optional[str], Optional[int], Optional[int]]:
     """
-    Parse PROVIDED_AT column back to venue key, hour, minute, and AM/PM flag.
+    Parse PROVIDED_AT column back to venue key, hour, and minute.
 
     Args:
         text: composed string, e.g. "IL GUSTO 19.30PM" or "19.30PM"
 
     Returns:
-        (venue_key, hour, minute, is_pm) tuple. If time pattern not found, returns (None, None, None, None).
+        (venue_key, hour, minute) tuple. If time pattern not found, returns (None, None, None).
         Never raises. Case-insensitive matching against VENUE_DISPLAY values.
+        Note: AM/PM suffix is parsed but not returned (it is redundant with hour >= 12).
     """
     if not text or not isinstance(text, str):
-        return (None, None, None, None)
+        return (None, None, None)
 
     text = text.strip()
     if not text:
-        return (None, None, None, None)
+        return (None, None, None)
 
     # Extract trailing (\d{1,2})\.(\d{2})(AM|PM) pattern (case-insensitive)
     pattern = r"(\d{1,2})\.(\d{2})(AM|PM)$"
     match = re.search(pattern, text, re.IGNORECASE)
     if not match:
-        return (None, None, None, None)
+        return (None, None, None)
 
     try:
         hour = int(match.group(1))
         minute = int(match.group(2))
-        is_pm = match.group(3).upper() == "PM"
+        # is_pm = match.group(3).upper() == "PM"  # Parsed but not returned (redundant with hour >= 12)
     except (ValueError, IndexError):
-        return (None, None, None, None)
+        return (None, None, None)
 
     # Whatever text precedes the time pattern (stripped) is matched against VENUE_DISPLAY values
     venue_part = text[: match.start()].strip()
@@ -169,9 +170,9 @@ def parse_provided_at(text: str) -> Tuple[Optional[str], Optional[int], Optional
                 break
 
     if venue_key is None:
-        return (None, None, None, None)
+        return (None, None, None)
 
-    return (venue_key, hour, minute, is_pm)
+    return (venue_key, hour, minute)
 
 
 CHARGE_PAID = "paid"

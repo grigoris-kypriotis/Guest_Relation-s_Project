@@ -35,7 +35,6 @@ def generate_cake_memo_document(form_data: dict, save_path: str) -> None:
             - venue: str (one of VENUE_DISPLAY keys, e.g., 'il_gusto', 'room')
             - hour: int (0-23)
             - minute: int (0-59)
-            - is_pm: bool
             - charge_state: str (one of CHARGE_PAID, CHARGE_PENDING, CHARGE_COMPLIMENTARY)
             - complimentary_by: str (name, if charge_state is CHARGE_COMPLIMENTARY)
             - room_number: str
@@ -47,7 +46,7 @@ def generate_cake_memo_document(form_data: dict, save_path: str) -> None:
     Column mapping:
         - SERVICE DESCRIPTION ← compose_service_description(flavor, written_text)
         - QTY ← str(qty)
-        - PROVIDED AT ← compose_provided_at(venue, hour, minute, is_pm)
+        - PROVIDED AT ← compose_provided_at(venue, hour, minute)
         - DATE ← today's date in dd/mm format (never from form_data)
         - CHARGE ← compose_charge(charge_state, complimentary_by)
         - ROOM NUMBER ← room_number
@@ -108,7 +107,7 @@ def generate_cake_memo_document(form_data: dict, save_path: str) -> None:
     row.cells[col_indices["QTY"]].text = str(form_data["qty"])
 
     provided_at = compose_provided_at(
-        form_data["venue"], form_data["hour"], form_data["minute"], form_data["is_pm"]
+        form_data["venue"], form_data["hour"], form_data["minute"]
     )
     row.cells[col_indices["PROVIDED AT"]].text = provided_at
 

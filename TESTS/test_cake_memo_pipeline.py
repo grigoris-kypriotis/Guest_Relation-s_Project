@@ -117,71 +117,68 @@ class TestProvidedAtRoundTrip(unittest.TestCase):
     def test_all_venues_various_times(self):
         """All 5 venues compose and parse correctly with various time combinations."""
         test_cases = [
-            ("elia", 8, 0, False),
-            ("ermis", 12, 30, False),
-            ("ammos", 14, 45, False),
-            ("il_gusto", 19, 30, True),  # confirmed real example
-            ("room", 20, 15, True),
-            ("elia", 6, 0, False),
-            ("il_gusto", 23, 59, True),
+            ("elia", 8, 0),
+            ("ermis", 12, 30),
+            ("ammos", 14, 45),
+            ("il_gusto", 19, 30),  # confirmed real example
+            ("room", 20, 15),
+            ("elia", 6, 0),
+            ("il_gusto", 23, 59),
         ]
 
-        for venue_key, hour, minute, is_pm in test_cases:
-            with self.subTest(venue=venue_key, hour=hour, minute=minute, is_pm=is_pm):
-                composed = compose_provided_at(venue_key, hour, minute, is_pm)
-                parsed_venue, parsed_hour, parsed_minute, parsed_is_pm = parse_provided_at(composed)
+        for venue_key, hour, minute in test_cases:
+            with self.subTest(venue=venue_key, hour=hour, minute=minute):
+                composed = compose_provided_at(venue_key, hour, minute)
+                parsed_venue, parsed_hour, parsed_minute = parse_provided_at(composed)
                 self.assertEqual(parsed_venue, venue_key)
                 self.assertEqual(parsed_hour, hour)
                 self.assertEqual(parsed_minute, minute)
-                self.assertEqual(parsed_is_pm, is_pm)
 
     def test_real_example_exact_string(self):
         """Verify the exact confirmed real example: 'IL GUSTO 19.30PM'."""
-        composed = compose_provided_at("il_gusto", 19, 30, True)
+        composed = compose_provided_at("il_gusto", 19, 30)
         self.assertEqual(composed, "IL GUSTO 19.30PM")
 
         # And verify it parses back correctly
-        venue, hour, minute, is_pm = parse_provided_at("IL GUSTO 19.30PM")
+        venue, hour, minute = parse_provided_at("IL GUSTO 19.30PM")
         self.assertEqual(venue, "il_gusto")
         self.assertEqual(hour, 19)
         self.assertEqual(minute, 30)
-        self.assertTrue(is_pm)
 
     def test_room_venue_no_prefix(self):
         """Room venue produces just the time (no venue prefix)."""
-        composed = compose_provided_at("room", 14, 30, False)
-        self.assertEqual(composed, "14.30AM")
+        composed = compose_provided_at("room", 14, 30)
+        self.assertEqual(composed, "14.30PM")
 
-        venue, hour, minute, is_pm = parse_provided_at("14.30AM")
+        venue, hour, minute = parse_provided_at("14.30PM")
         self.assertEqual(venue, "room")
         self.assertEqual(hour, 14)
         self.assertEqual(minute, 30)
-        self.assertFalse(is_pm)
 
     def test_compose_format_examples(self):
         """Verify exact composed formats."""
-        self.assertEqual(compose_provided_at("elia", 8, 0, False), "ELIA 08.00AM")
-        self.assertEqual(compose_provided_at("ermis", 12, 30, False), "ERMIS 12.30AM")
-        self.assertEqual(compose_provided_at("ammos", 14, 45, False), "AMMOS 14.45AM")
-        self.assertEqual(compose_provided_at("il_gusto", 19, 30, True), "IL GUSTO 19.30PM")
-        self.assertEqual(compose_provided_at("room", 20, 15, True), "20.15PM")
+        self.assertEqual(compose_provided_at("elia", 8, 0), "ELIA 08.00AM")
+        self.assertEqual(compose_provided_at("ermis", 12, 30), "ERMIS 12.30PM")
+        self.assertEqual(compose_provided_at("ammos", 14, 45), "AMMOS 14.45PM")
+        self.assertEqual(compose_provided_at("il_gusto", 19, 30), "IL GUSTO 19.30PM")
+        self.assertEqual(compose_provided_at("room", 20, 15), "20.15PM")
 
     def test_parse_case_insensitive_venue_matching(self):
         """parse_provided_at performs case-insensitive venue matching."""
         # Lowercase venue
-        venue, hour, minute, is_pm = parse_provided_at("elia 08.00AM")
+        venue, hour, minute = parse_provided_at("elia 08.00AM")
         self.assertEqual(venue, "elia")
 
         # Mixed case venue
-        venue, hour, minute, is_pm = parse_provided_at("ErMiS 12.30AM")
+        venue, hour, minute = parse_provided_at("ErMiS 12.30PM")
         self.assertEqual(venue, "ermis")
 
         # IL GUSTO with various cases
-        venue, hour, minute, is_pm = parse_provided_at("il gusto 19.30PM")
+        venue, hour, minute = parse_provided_at("il gusto 19.30PM")
         self.assertEqual(venue, "il_gusto")
 
     def test_parse_no_time_pattern_returns_all_none(self):
-        """parse_provided_at returns (None, None, None, None) if time pattern not found."""
+        """parse_provided_at returns (None, None, None) if time pattern not found."""
         invalid_texts = [
             "Random text",
             "ELIA 19",  # incomplete time
@@ -193,21 +190,20 @@ class TestProvidedAtRoundTrip(unittest.TestCase):
         ]
         for text in invalid_texts:
             with self.subTest(text=text):
-                venue, hour, minute, is_pm = parse_provided_at(text)
+                venue, hour, minute = parse_provided_at(text)
                 self.assertIsNone(venue)
                 self.assertIsNone(hour)
                 self.assertIsNone(minute)
-                self.assertIsNone(is_pm)
 
     def test_parse_time_boundary_cases(self):
         """parse_provided_at correctly parses boundary hour/minute values."""
         # Single-digit hour
-        venue, hour, minute, is_pm = parse_provided_at("ammos 8.00AM")
+        venue, hour, minute = parse_provided_at("ammos 8.00AM")
         self.assertEqual(hour, 8)
         self.assertEqual(minute, 0)
 
         # Double-digit minute with room venue (no prefix)
-        venue, hour, minute, is_pm = parse_provided_at("23.59PM")
+        venue, hour, minute = parse_provided_at("23.59PM")
         self.assertEqual(venue, "room")
         self.assertEqual(hour, 23)
         self.assertEqual(minute, 59)
@@ -345,7 +341,6 @@ class TestCakeMemoDocumentGeneration(unittest.TestCase):
             "venue": "il_gusto",
             "hour": 19,
             "minute": 30,
-            "is_pm": True,
             "charge_state": CHARGE_COMPLIMENTARY,
             "complimentary_by": "Maria Papadopoulou",
             "room_number": "0412",
@@ -367,7 +362,6 @@ class TestCakeMemoDocumentGeneration(unittest.TestCase):
             self.assertEqual(parsed["venue"], form_data["venue"])
             self.assertEqual(parsed["hour"], form_data["hour"])
             self.assertEqual(parsed["minute"], form_data["minute"])
-            self.assertEqual(parsed["is_pm"], form_data["is_pm"])
             self.assertEqual(parsed["charge_state"], form_data["charge_state"])
             self.assertEqual(parsed["complimentary_by"], form_data["complimentary_by"])
             self.assertEqual(parsed["room_number"], form_data["room_number"])
@@ -388,7 +382,6 @@ class TestCakeMemoDocumentGeneration(unittest.TestCase):
             "venue": "room",
             "hour": 14,
             "minute": 30,
-            "is_pm": False,
             "charge_state": CHARGE_PAID,
             "complimentary_by": "",
             "room_number": "0305",
@@ -406,7 +399,6 @@ class TestCakeMemoDocumentGeneration(unittest.TestCase):
             self.assertEqual(parsed["venue"], "room")
             self.assertEqual(parsed["hour"], 14)
             self.assertEqual(parsed["minute"], 30)
-            self.assertFalse(parsed["is_pm"])
             self.assertEqual(parsed["charge_state"], CHARGE_PAID)
             self.assertEqual(parsed["complimentary_by"], "")
             self.assertEqual(parsed["room_number"], "0305")
@@ -427,7 +419,6 @@ class TestCakeMemoDocumentGeneration(unittest.TestCase):
             "venue": "elia",
             "hour": 8,
             "minute": 0,
-            "is_pm": False,
             "charge_state": CHARGE_PENDING,
             "complimentary_by": "",
             "room_number": "0118",
@@ -445,7 +436,6 @@ class TestCakeMemoDocumentGeneration(unittest.TestCase):
             self.assertEqual(parsed["venue"], "elia")
             self.assertEqual(parsed["hour"], 8)
             self.assertEqual(parsed["minute"], 0)
-            self.assertFalse(parsed["is_pm"])
             self.assertEqual(parsed["charge_state"], CHARGE_PENDING)
             self.assertEqual(parsed["complimentary_by"], "")
             self.assertEqual(parsed["room_number"], "0118")
@@ -467,7 +457,6 @@ class TestCakeMemoDocumentGeneration(unittest.TestCase):
             "venue": "room",
             "hour": 12,
             "minute": 0,
-            "is_pm": False,
             "charge_state": CHARGE_PAID,
             "complimentary_by": "",
             "room_number": "0101",
@@ -553,7 +542,6 @@ class TestCakeMemoDocumentGeneration(unittest.TestCase):
             "venue": "room",
             "hour": 12,
             "minute": 0,
-            "is_pm": False,
             "charge_state": CHARGE_PAID,
             "complimentary_by": "",
             "room_number": "0101",
@@ -639,10 +627,9 @@ class TestCakeMemoForm(unittest.TestCase):
         self.assertEqual(form_data["venue"], "il_gusto")
         self.assertEqual(form_data["hour"], 19)
         self.assertEqual(form_data["minute"], 30)
-        self.assertTrue(form_data["is_pm"])
 
         # Verify round-trip through compose_provided_at
-        composed = compose_provided_at("il_gusto", 19, 30, True)
+        composed = compose_provided_at("il_gusto", 19, 30)
         self.assertEqual(composed, "IL GUSTO 19.30PM")  # Confirmed real example
 
     def test_complimentary_field_visibility(self):
@@ -687,7 +674,6 @@ class TestCakeMemoForm(unittest.TestCase):
             "venue": "elia",
             "hour": 8,
             "minute": 0,
-            "is_pm": False,
             "charge_state": CHARGE_PAID,
             "complimentary_by": "",
             "room_number": "0101",
@@ -711,7 +697,6 @@ class TestCakeMemoForm(unittest.TestCase):
         self.assertEqual(collected1["venue"], scenario1["venue"])
         self.assertEqual(collected1["hour"], scenario1["hour"])
         self.assertEqual(collected1["minute"], scenario1["minute"])
-        self.assertEqual(collected1["is_pm"], scenario1["is_pm"])
         self.assertEqual(collected1["charge_state"], scenario1["charge_state"])
         self.assertEqual(collected1["room_number"], scenario1["room_number"])
 
@@ -724,7 +709,6 @@ class TestCakeMemoForm(unittest.TestCase):
             "venue": "il_gusto",
             "hour": 19,
             "minute": 30,
-            "is_pm": True,
             "charge_state": CHARGE_COMPLIMENTARY,
             "complimentary_by": "Manager",
             "room_number": "0412",
@@ -748,7 +732,6 @@ class TestCakeMemoForm(unittest.TestCase):
         self.assertEqual(collected2["venue"], scenario2["venue"])
         self.assertEqual(collected2["hour"], scenario2["hour"])
         self.assertEqual(collected2["minute"], scenario2["minute"])
-        self.assertEqual(collected2["is_pm"], scenario2["is_pm"])
         self.assertEqual(collected2["charge_state"], scenario2["charge_state"])
         self.assertEqual(collected2["complimentary_by"], scenario2["complimentary_by"])
         self.assertEqual(collected2["room_number"], scenario2["room_number"])
@@ -989,7 +972,6 @@ class TestCakeMemoOptionWidget(unittest.TestCase):
                 "venue": "room",
                 "hour": 12,
                 "minute": 0,
-                "is_pm": False,
                 "charge_state": CHARGE_PAID,
                 "complimentary_by": "",
                 "room_number": "0000",
@@ -1040,7 +1022,6 @@ class TestCakeMemoOptionWidget(unittest.TestCase):
                 "venue": "room",
                 "hour": 12,
                 "minute": 0,
-                "is_pm": False,
                 "charge_state": CHARGE_PAID,
                 "complimentary_by": "",
                 "room_number": "0101",
@@ -1217,7 +1198,7 @@ class TestCakeMemoOptionWidget(unittest.TestCase):
                      patch('OPTIONS.cake_memo.widget.parse_cake_memo_document') as mock_parse, \
                      patch('OPTIONS._shared.task_widget.win32com.client.Dispatch') as mock_dispatch:
                     mock_picker.return_value = (test_file, "")
-                    mock_parse.return_value = {"room_number": "123", "flavor": "chocolate", "venue": "IL GUSTO", "hour": 19, "minute": 30, "is_pm": True}
+                    mock_parse.return_value = {"room_number": "123", "flavor": "chocolate", "venue": "IL GUSTO", "hour": 19, "minute": 30}
                     mock_outlook = MagicMock()
                     mock_mail = MagicMock()
                     mock_dispatch.return_value = mock_outlook
@@ -1272,7 +1253,7 @@ class TestCakeMemoOptionWidget(unittest.TestCase):
                 with patch('OPTIONS.cake_memo.widget.QFileDialog.getOpenFileName') as mock_picker, \
                      patch('OPTIONS.cake_memo.widget.parse_cake_memo_document') as mock_parse, \
                      patch('OPTIONS._shared.task_widget.win32com.client.Dispatch'):
-                    mock_parse.return_value = {"room_number": "123", "flavor": "chocolate", "venue": "IL GUSTO", "hour": 19, "minute": 30, "is_pm": True}
+                    mock_parse.return_value = {"room_number": "123", "flavor": "chocolate", "venue": "IL GUSTO", "hour": 19, "minute": 30}
                     # First call returns file1
                     mock_picker.return_value = (test_file1, "")
                     widget.handle_send_email()
@@ -1317,7 +1298,7 @@ class TestCakeMemoOptionWidget(unittest.TestCase):
                 with patch('OPTIONS.cake_memo.widget.QFileDialog.getOpenFileName') as mock_picker, \
                      patch('OPTIONS.cake_memo.widget.parse_cake_memo_document') as mock_parse, \
                      patch('OPTIONS._shared.task_widget.win32com.client.Dispatch'):
-                    mock_parse.return_value = {"room_number": "123", "flavor": "chocolate", "venue": "IL GUSTO", "hour": 19, "minute": 30, "is_pm": True}
+                    mock_parse.return_value = {"room_number": "123", "flavor": "chocolate", "venue": "IL GUSTO", "hour": 19, "minute": 30}
                     # Always return same file
                     mock_picker.return_value = (test_file, "")
 
@@ -1366,7 +1347,7 @@ class TestCakeMemoOptionWidget(unittest.TestCase):
                      patch('OPTIONS.cake_memo.widget.parse_cake_memo_document') as mock_parse, \
                      patch('OPTIONS._shared.task_widget.win32com.client.Dispatch'):
                     mock_picker.return_value = (test_file, "")
-                    mock_parse.return_value = {"room_number": "123", "flavor": "chocolate", "venue": "IL GUSTO", "hour": 19, "minute": 30, "is_pm": True}
+                    mock_parse.return_value = {"room_number": "123", "flavor": "chocolate", "venue": "IL GUSTO", "hour": 19, "minute": 30}
 
                     widget.handle_send_email()
 

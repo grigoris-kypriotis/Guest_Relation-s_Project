@@ -41,7 +41,6 @@ def parse_cake_memo_document(docx_path: str) -> dict:
             - venue: str (one of VENUE_DISPLAY keys)
             - hour: int
             - minute: int
-            - is_pm: bool
             - charge_state: str (one of CHARGE_*)
             - complimentary_by: str
             - room_number: str
@@ -125,8 +124,8 @@ def parse_cake_memo_document(docx_path: str) -> dict:
         qty = 1
 
     # Parse PROVIDED AT
-    venue, hour, minute, is_pm = parse_provided_at(provided_at_text)
-    if venue is None or hour is None or minute is None or is_pm is None:
+    venue, hour, minute = parse_provided_at(provided_at_text)
+    if venue is None or hour is None or minute is None:
         # Malformed PROVIDED AT; raise rather than silently default
         raise ValueError(
             f"Cannot parse PROVIDED AT: '{provided_at_text}' "
@@ -146,7 +145,6 @@ def parse_cake_memo_document(docx_path: str) -> dict:
         "venue": venue,
         "hour": hour,
         "minute": minute,
-        "is_pm": is_pm,
         "charge_state": charge_state,
         "complimentary_by": complimentary_by,
         "room_number": room_number,
