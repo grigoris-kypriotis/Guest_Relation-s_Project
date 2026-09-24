@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Optional, Callable
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QFrame, QFileDialog, QMessageBox, QPushButton, QHBoxLayout
+    QWidget, QVBoxLayout, QLabel, QFrame, QFileDialog, QMessageBox, QPushButton, QHBoxLayout, QScrollArea
 )
 
 from MODULES.cake_memo.document import generate_cake_memo_document
@@ -65,11 +65,16 @@ class CakeMemoOptionWidget(QWidget):
         self.form = CakeMemoForm()
         self.office_viewer = OfficeViewer()
 
-        cc_layout.addWidget(self.form, stretch=1)
+        # Wrap form in QScrollArea
+        self.form_scroll = QScrollArea()
+        self.form_scroll.setWidgetResizable(True)
+        self.form_scroll.setWidget(self.form)
+
+        cc_layout.addWidget(self.form_scroll, stretch=1)
         cc_layout.addWidget(self.office_viewer, stretch=1)
 
         # Both hidden initially (mode is None)
-        self.form.hide()
+        self.form_scroll.hide()
         self.office_viewer.hide()
 
         cake_layout.addWidget(cake_container)
@@ -90,7 +95,7 @@ class CakeMemoOptionWidget(QWidget):
         self.mode = "create"
         self.loaded_file_path = None
         self.form.reset()
-        self.form.show()
+        self.form_scroll.show()
         self.office_viewer.hide()
         self._log("Create Cake Memo mode activated.", "INFO")
 
@@ -117,7 +122,7 @@ class CakeMemoOptionWidget(QWidget):
         self.form.set_form_data(data)
         self.mode = "update"
         self.loaded_file_path = path
-        self.form.show()
+        self.form_scroll.show()
         self.office_viewer.hide()
         self._log(f"Loaded for update: {os.path.basename(path)}", "SUCCESS")
 
@@ -134,7 +139,7 @@ class CakeMemoOptionWidget(QWidget):
 
         self.mode = "edit"
         self.loaded_file_path = path
-        self.form.hide()
+        self.form_scroll.hide()
         self.office_viewer.open_file(path)
         self._log(f"Edit mode: {os.path.basename(path)}", "INFO")
 
@@ -173,7 +178,7 @@ class CakeMemoOptionWidget(QWidget):
                     generate_cake_memo_document(data, final_path)
                     self._log(f"Cake memo saved: {os.path.basename(final_path)}", "SUCCESS")
                     self.mode = None
-                    self.form.hide()
+                    self.form_scroll.hide()
                     self.loaded_file_path = None
 
                 else:  # mode == "update"
@@ -181,7 +186,7 @@ class CakeMemoOptionWidget(QWidget):
                     generate_cake_memo_document(data, self.loaded_file_path)
                     self._log(f"Cake memo updated: {os.path.basename(self.loaded_file_path)}", "SUCCESS")
                     self.mode = None
-                    self.form.hide()
+                    self.form_scroll.hide()
                     self.loaded_file_path = None
 
             except Exception as e:
@@ -202,7 +207,7 @@ class CakeMemoOptionWidget(QWidget):
 
         if self.mode in ("create", "update"):
             self._log(f"Discarding {self.mode} mode changes.", "INFO")
-            self.form.hide()
+            self.form_scroll.hide()
             self.mode = None
             self.loaded_file_path = None
 
@@ -236,7 +241,7 @@ class CakeMemoOptionWidget(QWidget):
             memo_data = {
                 "room_number": data.get("room_number", "UNKNOWN"),
                 "cake_location": data.get("venue", "ROOM"),
-                "cake_time": self._format_time_for_email(data.get("hour"), data.get("minute"), data.get("is_pm")),
+                "cake_time": self._format_time_for_email(data.get("hour"), data.get("minute")),
                 "cake_date_display": datetime.now().strftime("%d/%m")
             }
 
@@ -258,10 +263,11 @@ class CakeMemoOptionWidget(QWidget):
         except Exception as e:
             self._log(f"Send Email error: {e}", "ERROR")
 
-    def _format_time_for_email(self, hour: int = None, minute: int = None, is_pm: bool = False) -> str:
-        """Formats time for email display (e.g., '19.30PM')."""
+    def _format_time_for_email(self, hour: int = None, minute: int = None) -> str:
+        """Formats time for email display (e.g., '19.30PM'). AM/PM derived from hour (0-23)."""
         if hour is None or minute is None:
             return "N/A"
+        is_pm = hour >= 12
         ampm = "PM" if is_pm else "AM"
         return f"{hour:02d}.{minute:02d}{ampm}"
 

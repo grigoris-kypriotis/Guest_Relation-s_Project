@@ -1478,6 +1478,113 @@ class TestCakeMemoOptionWidget(unittest.TestCase):
 
                 widget.deleteLater()
 
+    def test_format_time_for_email_am_hour(self):
+        """Test: _format_time_for_email() correctly formats AM hours (0-11) with AM designation."""
+        from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+
+        widget = CakeMemoOptionWidget()
+
+        # Test hour=8 (morning), minute=30
+        result = widget._format_time_for_email(8, 30)
+        self.assertEqual(result, "08.30AM", "Hour 8 should produce AM designation")
+
+        # Test hour=0 (midnight), minute=0
+        result = widget._format_time_for_email(0, 0)
+        self.assertEqual(result, "00.00AM", "Hour 0 (midnight) should produce AM designation")
+
+        # Test hour=11 (late morning), minute=59
+        result = widget._format_time_for_email(11, 59)
+        self.assertEqual(result, "11.59AM", "Hour 11 should produce AM designation")
+
+    def test_format_time_for_email_pm_hour(self):
+        """Test: _format_time_for_email() correctly formats PM hours (12-23) with PM designation."""
+        from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+
+        widget = CakeMemoOptionWidget()
+
+        # Test hour=19 (7 PM), minute=30 (confirmed real example from compose_provided_at)
+        result = widget._format_time_for_email(19, 30)
+        self.assertEqual(result, "19.30PM", "Hour 19 should produce PM designation")
+
+        # Test hour=12 (noon), minute=0
+        result = widget._format_time_for_email(12, 0)
+        self.assertEqual(result, "12.00PM", "Hour 12 (noon) should produce PM designation")
+
+        # Test hour=23 (11 PM), minute=59
+        result = widget._format_time_for_email(23, 59)
+        self.assertEqual(result, "23.59PM", "Hour 23 should produce PM designation")
+
+    def test_format_time_for_email_none_inputs(self):
+        """Test: _format_time_for_email() returns 'N/A' for None inputs."""
+        from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+
+        widget = CakeMemoOptionWidget()
+
+        # Test with None hour
+        result = widget._format_time_for_email(None, 30)
+        self.assertEqual(result, "N/A")
+
+        # Test with None minute
+        result = widget._format_time_for_email(19, None)
+        self.assertEqual(result, "N/A")
+
+        # Test with both None
+        result = widget._format_time_for_email(None, None)
+        self.assertEqual(result, "N/A")
+
+    def test_form_scroll_visibility_create_mode(self):
+        """Test: handle_create_cake_memo() shows form_scroll (via isHidden() check)."""
+        from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+
+        widget = CakeMemoOptionWidget()
+
+        # Initially form_scroll should be hidden
+        self.assertTrue(widget.form_scroll.isHidden(), "form_scroll should be hidden initially")
+
+        # After handle_create_cake_memo, it should be shown
+        widget.handle_create_cake_memo()
+        self.assertFalse(widget.form_scroll.isHidden(), "form_scroll should be visible in create mode")
+
+    def test_form_scroll_visibility_mode_transitions(self):
+        """Test: form_scroll visibility transitions correctly across Create, Close, Create modes."""
+        from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+
+        widget = CakeMemoOptionWidget()
+
+        # Initially hidden
+        self.assertTrue(widget.form_scroll.isHidden(), "form_scroll should be hidden initially")
+
+        # Transition to Create: should show
+        widget.handle_create_cake_memo()
+        self.assertFalse(widget.form_scroll.isHidden(), "form_scroll should be visible in create mode")
+
+        # Transition to Close: should hide
+        widget.handle_close()
+        self.assertTrue(widget.form_scroll.isHidden(), "form_scroll should be hidden after close")
+
+        # Transition to Create again: should show
+        widget.handle_create_cake_memo()
+        self.assertFalse(widget.form_scroll.isHidden(), "form_scroll should be visible in create mode again")
+
+
+    def test_build_submenu_and_construction_no_crash(self):
+        """Test: CakeMemoOptionWidget() + build_submenu() construction with QScrollArea wrapping does not crash."""
+        from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+
+        # Construct widget
+        widget = CakeMemoOptionWidget()
+        self.assertIsNotNone(widget)
+        self.assertIsNotNone(widget.form_scroll, "form_scroll should exist after construction")
+        self.assertTrue(widget.form_scroll.isHidden(), "form_scroll should be hidden initially")
+
+        # Build submenu (this exercises the entire initialization chain)
+        submenu = widget.build_submenu()
+        self.assertIsNotNone(submenu)
+
+        # Verify widget is still intact after submenu build
+        self.assertIsNotNone(widget.form_scroll)
+        self.assertTrue(widget.form_scroll.isHidden())
+
 
 if __name__ == "__main__":
     unittest.main()
