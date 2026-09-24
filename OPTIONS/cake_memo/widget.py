@@ -21,6 +21,7 @@ from OPTIONS._shared_widgets import OfficeViewer
 from OPTIONS.configuration_option import load_app_settings
 from OPTIONS.cake_memo.form import CakeMemoForm
 from MODULES.cake_memo.paths import DEFAULT_CAKE_MEMOS_DIR
+from OPTIONS.cake_memo_option import generate_cake_memo_outlook_payload
 
 
 class CakeMemoOptionWidget(QWidget):
@@ -212,9 +213,57 @@ class CakeMemoOptionWidget(QWidget):
             self.loaded_file_path = None
 
     def handle_send_email(self) -> None:
-        """Placeholder for Step 5 implementation."""
-        self._log("Send Email not yet implemented.", "WARNING")
-        return
+        """Prompts for a cake memo file (always explicit — multiple memos can exist per day,
+        unlike Offers' single-daily-file auto-resolution), opens an Outlook draft (display-only,
+        never auto-sent), and reuses/creates a per-file To-Do task."""
+        try:
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Select a Cake Memo to email", self._get_cake_memos_dir(), "Word Documents (*.docx)"
+            )
+            if not path:
+                return
+            if self.todo_widget is None:
+                self._log("To-Do list unavailable; cannot create/send task.", "ERROR")
+                return
+
+            try:
+                data = parse_cake_memo_document(path)
+            except Exception as e:
+                self._log(f"Failed to parse cake memo for email: {e}", "ERROR")
+                return
+
+            # Translate new parsed shape to the shape that generate_cake_memo_outlook_payload expects
+            memo_data = {
+                "room_number": data.get("room_number", "UNKNOWN"),
+                "cake_location": data.get("venue", "ROOM"),
+                "cake_time": self._format_time_for_email(data.get("hour"), data.get("minute"), data.get("is_pm")),
+                "cake_date_display": datetime.now().strftime("%d/%m")
+            }
+
+            payload = generate_cake_memo_outlook_payload(path, memo_data)
+
+            description = f"Send Cake Memo Email: {os.path.basename(path)}"
+            task_id = self.todo_widget.get_or_create_task(description, payload)
+            task_widget = self.todo_widget.active_tasks.get(task_id)
+            if task_widget:
+                draft_failure = {}
+                def _on_draft_error(error):
+                    draft_failure["error"] = error
+                    self._log(f"Outlook draft error: {error}", "ERROR")
+                task_widget.manual_draft_outlook(error_callback=_on_draft_error)
+                if "error" not in draft_failure:
+                    self._log(f"Outlook draft opened for: {os.path.basename(path)}", "SUCCESS")
+            else:
+                self._log("Task created but widget reference not found — draft not opened.", "ERROR")
+        except Exception as e:
+            self._log(f"Send Email error: {e}", "ERROR")
+
+    def _format_time_for_email(self, hour: int = None, minute: int = None, is_pm: bool = False) -> str:
+        """Formats time for email display (e.g., '19.30PM')."""
+        if hour is None or minute is None:
+            return "N/A"
+        ampm = "PM" if is_pm else "AM"
+        return f"{hour:02d}.{minute:02d}{ampm}"
 
     def activate(self) -> None:
         """Called when this option is selected from the menu. No-op for Cake Memo."""

@@ -1328,11 +1328,11 @@ class TestTaskWidgetOfferListStateTransition(unittest.TestCase):
 
         task.deleteLater()
 
-    def test_manual_draft_outlook_does_not_set_state_for_cake_memo(self):
+    def test_manual_draft_outlook_sets_state_for_cake_memo(self):
         """
-        Test 2 (CRITICAL REGRESSION): manual_draft_outlook should NOT set state
-        to 📨 when payload has subcategory == "Cake Memo" (different task type).
-        This proves the subcategory gating is working correctly.
+        Test 2 (CRITICAL REGRESSION — UPDATED for Step 5): manual_draft_outlook SHOULD set state
+        to 📨 when payload has subcategory == "Cake Memo" (now an approved task type).
+        Step 5 widens the 📨 gate to include both "Offer List" and "Cake Memo".
         """
         payload = {
             "type": "outlook_draft",
@@ -1363,9 +1363,9 @@ class TestTaskWidgetOfferListStateTransition(unittest.TestCase):
             # Verify Display was called
             mock_mail.Display.assert_called_once()
 
-            # Verify state did NOT change to 📨 (should remain at initial state ⏳)
-            self.assertEqual(task.btn_state.text(), "⏳",
-                           "State should NOT change for Cake Memo task (subcategory is not 'Offer List')")
+            # Verify state DID change to 📨 (Cake Memo is now in the allow-list)
+            self.assertEqual(task.btn_state.text(), "📨",
+                           "State SHOULD change to 📨 for Cake Memo task (subcategory is now in allow-list)")
 
         task.deleteLater()
 

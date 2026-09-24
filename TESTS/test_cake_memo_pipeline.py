@@ -1103,20 +1103,286 @@ class TestCakeMemoOptionWidget(unittest.TestCase):
             files = os.listdir(tmpdir)
             self.assertEqual(len(files), 0, f"Expected no files, but found {files}")
 
-    def test_handle_send_email_stub_is_warning(self):
-        """Test: handle_send_email() is a stub that just logs a WARNING."""
+    def test_manual_draft_outlook_transitions_to_email_state_for_cake_memo(self):
+        """
+        Test 1: manual_draft_outlook() with a subcategory="Cake Memo" payload
+        transitions the TaskWidget to 📨 after successful Display().
+        """
+        from OPTIONS._shared.task_widget import TaskWidget
+        from unittest.mock import patch, MagicMock
+
+        payload = {
+            "type": "outlook_draft",
+            "subcategory": "Cake Memo",
+            "data": {
+                "To": "test@example.com",
+                "CC": "",
+                "Subject": "Test Cake Memo",
+                "HTMLBody": "Test body",
+                "Attachment": None
+            }
+        }
+
+        task = TaskWidget("Test Cake Memo Task", "cake_task_1", payload=payload)
+        self.assertEqual(task.btn_state.text(), "⏳", "Initial state should be ⏳")
+
+        # Mock Dispatch to prevent real Outlook usage
+        with patch('OPTIONS._shared.task_widget.win32com.client.Dispatch') as mock_dispatch:
+            mock_outlook = MagicMock()
+            mock_mail = MagicMock()
+            mock_dispatch.return_value = mock_outlook
+            mock_outlook.CreateItem.return_value = mock_mail
+
+            task.manual_draft_outlook()
+
+            # Verify Display was called
+            mock_mail.Display.assert_called_once()
+
+            # Verify state changed to 📨
+            self.assertEqual(task.btn_state.text(), "📨",
+                           "State should transition to 📨 for Cake Memo payload")
+
+        task.deleteLater()
+
+    def test_manual_draft_outlook_does_not_transition_for_other_subcategory(self):
+        """
+        Test 2: manual_draft_outlook() with an unknown subcategory does NOT transition to 📨,
+        proving the gate is a real allow-list.
+        """
+        from OPTIONS._shared.task_widget import TaskWidget
+        from unittest.mock import patch, MagicMock
+
+        payload = {
+            "type": "outlook_draft",
+            "subcategory": "Something Else",
+            "data": {
+                "To": "test@example.com",
+                "CC": "",
+                "Subject": "Test",
+                "HTMLBody": "Test body",
+                "Attachment": None
+            }
+        }
+
+        task = TaskWidget("Test Other Task", "other_task_1", payload=payload)
+        self.assertEqual(task.btn_state.text(), "⏳")
+
+        with patch('OPTIONS._shared.task_widget.win32com.client.Dispatch') as mock_dispatch:
+            mock_outlook = MagicMock()
+            mock_mail = MagicMock()
+            mock_dispatch.return_value = mock_outlook
+            mock_outlook.CreateItem.return_value = mock_mail
+
+            task.manual_draft_outlook()
+
+            mock_mail.Display.assert_called_once()
+
+            # State should remain ⏳
+            self.assertEqual(task.btn_state.text(), "⏳",
+                           "State should NOT change for unknown subcategory (allow-list in effect)")
+
+        task.deleteLater()
+
+    def test_handle_send_email_creates_task_from_file_pick(self):
+        """
+        Test 3: handle_send_email() with a mocked file picker creates a task
+        via get_or_create_task and invokes manual_draft_outlook.
+        """
         from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+        from OPTIONS.todo_option import TodoWidget
+        from unittest.mock import patch, MagicMock, call
+        import tempfile
+        import os
 
-        log_messages = []
-        def capture_log(category, message, level):
-            log_messages.append((category, message, level))
+        # Create a temporary test docx file
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_file = os.path.join(tmpdir, "test_cake_memo.docx")
 
-        widget = CakeMemoOptionWidget(log_callback=capture_log)
-        widget.handle_send_email()
+            # Create a minimal valid docx (from template copy)
+            from MODULES.cake_memo.paths import CAKE_MEMO_TEMPLATE_PATH
+            if CAKE_MEMO_TEMPLATE_PATH and os.path.exists(CAKE_MEMO_TEMPLATE_PATH):
+                import shutil
+                shutil.copy2(CAKE_MEMO_TEMPLATE_PATH, test_file)
 
-        # Should have logged a warning
-        warning_logs = [msg for msg in log_messages if msg[2] == "WARNING"]
-        self.assertTrue(any("not yet implemented" in msg[1].lower() for msg in warning_logs))
+                log_messages = []
+                def capture_log(category, message, level):
+                    log_messages.append((category, message, level))
+
+                # Create the widget with a mock todo_widget
+                todo_widget = TodoWidget(parent=None, log_callback=capture_log)
+                widget = CakeMemoOptionWidget(log_callback=capture_log, todo_widget=todo_widget)
+
+                # Mock the file picker and parser to return our test file
+                with patch('OPTIONS.cake_memo.widget.QFileDialog.getOpenFileName') as mock_picker, \
+                     patch('OPTIONS.cake_memo.widget.parse_cake_memo_document') as mock_parse, \
+                     patch('OPTIONS._shared.task_widget.win32com.client.Dispatch') as mock_dispatch:
+                    mock_picker.return_value = (test_file, "")
+                    mock_parse.return_value = {"room_number": "123", "flavor": "chocolate", "venue": "IL GUSTO", "hour": 19, "minute": 30, "is_pm": True}
+                    mock_outlook = MagicMock()
+                    mock_mail = MagicMock()
+                    mock_dispatch.return_value = mock_outlook
+                    mock_outlook.CreateItem.return_value = mock_mail
+
+                    widget.handle_send_email()
+
+                    # Verify file picker was called
+                    mock_picker.assert_called_once()
+
+                    # Verify a task was created
+                    self.assertEqual(len(todo_widget.active_tasks), 1,
+                                   "Should create exactly one task")
+
+                    # Verify Display was called (manual_draft_outlook executed)
+                    mock_mail.Display.assert_called_once()
+
+                    # Verify success was logged
+                    success_logs = [msg for msg in log_messages if msg[2] == "SUCCESS"]
+                    self.assertTrue(any("Outlook draft opened" in msg[1] for msg in success_logs))
+
+                widget.deleteLater()
+
+    def test_handle_send_email_different_files_create_distinct_tasks(self):
+        """
+        Test 4: Two different files picked in separate handle_send_email() calls
+        create two distinct tasks (not reused).
+        """
+        from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+        from OPTIONS.todo_option import TodoWidget
+        from unittest.mock import patch, MagicMock
+        import tempfile
+        import os
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create two test files
+            test_file1 = os.path.join(tmpdir, "memo1.docx")
+            test_file2 = os.path.join(tmpdir, "memo2.docx")
+
+            from MODULES.cake_memo.paths import CAKE_MEMO_TEMPLATE_PATH
+            if CAKE_MEMO_TEMPLATE_PATH and os.path.exists(CAKE_MEMO_TEMPLATE_PATH):
+                import shutil
+                shutil.copy2(CAKE_MEMO_TEMPLATE_PATH, test_file1)
+                shutil.copy2(CAKE_MEMO_TEMPLATE_PATH, test_file2)
+
+                log_messages = []
+                def capture_log(category, message, level):
+                    log_messages.append((category, message, level))
+                todo_widget = TodoWidget(parent=None, log_callback=capture_log)
+                widget = CakeMemoOptionWidget(log_callback=capture_log, todo_widget=todo_widget)
+
+                with patch('OPTIONS.cake_memo.widget.QFileDialog.getOpenFileName') as mock_picker, \
+                     patch('OPTIONS.cake_memo.widget.parse_cake_memo_document') as mock_parse, \
+                     patch('OPTIONS._shared.task_widget.win32com.client.Dispatch'):
+                    mock_parse.return_value = {"room_number": "123", "flavor": "chocolate", "venue": "IL GUSTO", "hour": 19, "minute": 30, "is_pm": True}
+                    # First call returns file1
+                    mock_picker.return_value = (test_file1, "")
+                    widget.handle_send_email()
+                    task_count_after_first = len(todo_widget.active_tasks)
+
+                    # Second call returns file2
+                    mock_picker.return_value = (test_file2, "")
+                    widget.handle_send_email()
+                    task_count_after_second = len(todo_widget.active_tasks)
+
+                    # Should have created two distinct tasks
+                    self.assertEqual(task_count_after_first, 1, "First file should create one task")
+                    self.assertEqual(task_count_after_second, 2, "Second file should create a second task")
+
+                widget.deleteLater()
+
+    def test_handle_send_email_same_file_reuses_task(self):
+        """
+        Test 5: Picking the same file twice in separate handle_send_email() calls
+        reuses the same task (no duplicate).
+        """
+        from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+        from OPTIONS.todo_option import TodoWidget
+        from unittest.mock import patch, MagicMock
+        import tempfile
+        import os
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_file = os.path.join(tmpdir, "memo.docx")
+
+            from MODULES.cake_memo.paths import CAKE_MEMO_TEMPLATE_PATH
+            if CAKE_MEMO_TEMPLATE_PATH and os.path.exists(CAKE_MEMO_TEMPLATE_PATH):
+                import shutil
+                shutil.copy2(CAKE_MEMO_TEMPLATE_PATH, test_file)
+
+                log_messages = []
+                def capture_log(category, message, level):
+                    log_messages.append((category, message, level))
+                todo_widget = TodoWidget(parent=None, log_callback=capture_log)
+                widget = CakeMemoOptionWidget(log_callback=capture_log, todo_widget=todo_widget)
+
+                with patch('OPTIONS.cake_memo.widget.QFileDialog.getOpenFileName') as mock_picker, \
+                     patch('OPTIONS.cake_memo.widget.parse_cake_memo_document') as mock_parse, \
+                     patch('OPTIONS._shared.task_widget.win32com.client.Dispatch'):
+                    mock_parse.return_value = {"room_number": "123", "flavor": "chocolate", "venue": "IL GUSTO", "hour": 19, "minute": 30, "is_pm": True}
+                    # Always return same file
+                    mock_picker.return_value = (test_file, "")
+
+                    widget.handle_send_email()
+                    task_count_after_first = len(todo_widget.active_tasks)
+                    first_task_id = list(todo_widget.active_tasks.keys())[0] if todo_widget.active_tasks else None
+
+                    widget.handle_send_email()
+                    task_count_after_second = len(todo_widget.active_tasks)
+                    second_task_id = list(todo_widget.active_tasks.keys())[0] if todo_widget.active_tasks else None
+
+                    # Should reuse the same task (only one task total)
+                    self.assertEqual(task_count_after_first, 1, "First call should create one task")
+                    self.assertEqual(task_count_after_second, 1, "Second call should reuse the task")
+                    self.assertEqual(first_task_id, second_task_id, "Task IDs should be identical")
+
+                widget.deleteLater()
+
+    def test_handle_send_email_payload_has_shared_recipients(self):
+        """
+        Test 6: handle_send_email() passes a payload with recipients matching
+        the shared TO_RECIPIENTS and CC_RECIPIENTS from fb_email_recipients.
+        """
+        from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+        from OPTIONS.todo_option import TodoWidget
+        from MODULES.common.fb_email_recipients import TO_RECIPIENTS, CC_RECIPIENTS
+        from unittest.mock import patch, MagicMock
+        import tempfile
+        import os
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_file = os.path.join(tmpdir, "memo.docx")
+
+            from MODULES.cake_memo.paths import CAKE_MEMO_TEMPLATE_PATH
+            if CAKE_MEMO_TEMPLATE_PATH and os.path.exists(CAKE_MEMO_TEMPLATE_PATH):
+                import shutil
+                shutil.copy2(CAKE_MEMO_TEMPLATE_PATH, test_file)
+
+                log_messages = []
+                def capture_log(category, message, level):
+                    log_messages.append((category, message, level))
+                todo_widget = TodoWidget(parent=None, log_callback=capture_log)
+                widget = CakeMemoOptionWidget(log_callback=capture_log, todo_widget=todo_widget)
+
+                with patch('OPTIONS.cake_memo.widget.QFileDialog.getOpenFileName') as mock_picker, \
+                     patch('OPTIONS.cake_memo.widget.parse_cake_memo_document') as mock_parse, \
+                     patch('OPTIONS._shared.task_widget.win32com.client.Dispatch'):
+                    mock_picker.return_value = (test_file, "")
+                    mock_parse.return_value = {"room_number": "123", "flavor": "chocolate", "venue": "IL GUSTO", "hour": 19, "minute": 30, "is_pm": True}
+
+                    widget.handle_send_email()
+
+                    # Retrieve the task widget and check its payload
+                    task_id = list(todo_widget.active_tasks.keys())[0] if todo_widget.active_tasks else None
+                    if task_id:
+                        task_widget = todo_widget.active_tasks.get(task_id)
+                        payload = task_widget.payload
+
+                        self.assertIn("data", payload)
+                        self.assertEqual(payload["data"]["To"], TO_RECIPIENTS,
+                                       "Payload should use shared TO_RECIPIENTS")
+                        self.assertEqual(payload["data"]["CC"], CC_RECIPIENTS,
+                                       "Payload should use shared CC_RECIPIENTS")
+
+                widget.deleteLater()
 
 
 if __name__ == "__main__":

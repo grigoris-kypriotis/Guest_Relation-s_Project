@@ -52,7 +52,7 @@ class TaskWidget(QWidget):
                 mail.Attachments.Add(os.path.abspath(attachment))
 
             mail.Display()
-            if self.payload.get("subcategory") == "Offer List":
+            if self.payload.get("subcategory") in ("Offer List", "Cake Memo"):
                 self.set_state("📨")
         except Exception as e:
             print(f"Failed to draft outlook email: {e}")
