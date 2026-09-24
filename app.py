@@ -83,7 +83,7 @@ class GuestRelationApp(QMainWindow):
         self.todo_widget = TodoWidget(log_callback=log_cb)
         self.offers_widget = OffersOptionWidget(log_callback=log_cb, todo_widget=self.todo_widget)
         self.allergies_widget = AllergiesWidget()
-        self.cake_widget = CakeMemoOptionWidget(log_callback=log_cb)
+        self.cake_widget = CakeMemoOptionWidget(log_callback=log_cb, todo_widget=self.todo_widget)
         self.booking_widget = BookingCallsOptionWidget(log_callback=log_cb)
         self.system_data_widget = SystemDataOptionWidget()
 
@@ -103,9 +103,6 @@ class GuestRelationApp(QMainWindow):
             "LOGS":        self.logs_widget,
         }
 
-        # Route generated tasks to TodoWidget
-        self.cake_widget.task_generated.connect(self.todo_widget.add_task_auto)
-
         # -----------------------------------------------------------------
         # Sidebar setup
         # -----------------------------------------------------------------
@@ -122,47 +119,8 @@ class GuestRelationApp(QMainWindow):
         self.btn_allergies = QPushButton("ALLERGIES")
         self.btn_cake = QPushButton("CAKE MEMOS")
 
-        # Sub-Menu for CAKE MEMOS
-        self.cake_submenu = QWidget()
-        cake_submenu_layout = QVBoxLayout(self.cake_submenu)
-        cake_submenu_layout.setContentsMargins(0, 4, 0, 6)
-        cake_submenu_layout.setSpacing(5)
-        self.cake_submenu.setStyleSheet(self.offers_submenu.styleSheet())
-
-        self.btn_cake_open_tpl = QPushButton("Open Cake Memo Template")
-        self.btn_cake_save = QPushButton("SAVE")
-        self.btn_cake_close = QPushButton("CLOSE")
-        self.btn_cake_save_close = QPushButton("SAVE & CLOSE (Outlook Draft)")
-
-        blue_sub_style = """
-            QPushButton {
-                background-color: #B0E0E6;
-                border: 1px solid #4682B4;
-                border-radius: 4px;
-                padding: 7px 10px 7px 20px;
-                text-align: left;
-                font-size: 11px;
-                font-weight: bold;
-                color: #0F3460;
-                margin-bottom: 2px;
-            }
-            QPushButton:hover { background-color: #4682B4; color: white; }
-        """
-        self.btn_cake_save.setStyleSheet(blue_sub_style)
-        self.btn_cake_close.setStyleSheet(blue_sub_style)
-        self.btn_cake_save_close.setStyleSheet(blue_sub_style)
-
-        self.btn_cake_open_tpl.clicked.connect(self.cake_widget.open_cake_memo_template)
-        self.btn_cake_save.clicked.connect(self.cake_widget.handle_cake_save)
-        self.btn_cake_close.clicked.connect(self.cake_widget.handle_cake_close)
-        self.btn_cake_save_close.clicked.connect(self.cake_widget.handle_cake_save_and_close)
-
-        cake_submenu_layout.addWidget(self.btn_cake_open_tpl)
-        cake_submenu_layout.addSpacing(14)
-        cake_submenu_layout.addWidget(self.btn_cake_save)
-        cake_submenu_layout.addWidget(self.btn_cake_close)
-        cake_submenu_layout.addWidget(self.btn_cake_save_close)
-        self.cake_submenu.hide()
+        # Build CAKE MEMOS submenu
+        self.cake_submenu = self.cake_widget.build_submenu()
 
         self.btn_booking = QPushButton("BOOKING CALLS")
 

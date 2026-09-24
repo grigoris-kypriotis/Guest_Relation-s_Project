@@ -21,7 +21,7 @@ from OPTIONS._shared_widgets import OfficeViewer
 from OPTIONS.configuration_option import load_app_settings
 from OPTIONS.cake_memo.form import CakeMemoForm
 from MODULES.cake_memo.paths import DEFAULT_CAKE_MEMOS_DIR
-from OPTIONS.cake_memo_option import generate_cake_memo_outlook_payload
+from OPTIONS.cake_memo.email_payload import generate_cake_memo_outlook_payload
 
 
 class CakeMemoOptionWidget(QWidget):
