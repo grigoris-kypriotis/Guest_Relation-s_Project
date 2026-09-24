@@ -5,6 +5,7 @@ Hermetic test suite exercising single-CSV processing, digit validation,
 Word document generation without COM/Outlook, and villa removal regression guards.
 """
 import csv
+import glob
 import json
 import os
 import shutil
@@ -1925,6 +1926,194 @@ class TestFBEmailRecipients(unittest.TestCase):
                         "Cake Memo payload must use shared TO_RECIPIENTS")
         self.assertEqual(payload["data"]["CC"], CC_RECIPIENTS,
                         "Cake Memo payload must use shared CC_RECIPIENTS")
+
+
+class TestConfigurableArrivalsDir(unittest.TestCase):
+    """
+    Tests for the configurable arrivals_dir setting.
+    Verifies that the setting appears in DEFAULT_APP_SETTINGS, round-trips through
+    load/save, and is correctly consumed by execute_offers_pipeline.
+    """
+
+    def setUp(self):
+        """Set up hermetic temp directories for settings tests."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.temp_arrivals = os.path.join(self.temp_dir, "custom_arrivals")
+        self.temp_output = os.path.join(self.temp_dir, "output")
+        os.makedirs(self.temp_arrivals, exist_ok=True)
+        os.makedirs(self.temp_output, exist_ok=True)
+
+        # Create custom settings file path
+        self.temp_settings_file = os.path.join(self.temp_dir, "app_settings.json")
+
+    def tearDown(self):
+        """Clean up temp directory."""
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_arrivals_dir_in_default_app_settings(self):
+        """
+        Test 1: arrivals_dir appears in DEFAULT_APP_SETTINGS["storage"]
+        with the expected default value.
+        """
+        from OPTIONS.configuration.settings_store import DEFAULT_APP_SETTINGS
+        from MODULES.offers.paths import ARRIVALS_FOLDER
+
+        # Verify arrivals_dir exists in storage
+        self.assertIn("arrivals_dir", DEFAULT_APP_SETTINGS["storage"])
+
+        # Verify it defaults to ARRIVALS_FOLDER
+        self.assertEqual(
+            DEFAULT_APP_SETTINGS["storage"]["arrivals_dir"],
+            ARRIVALS_FOLDER
+        )
+
+    def test_arrivals_dir_round_trip_load_save(self):
+        """
+        Test 2: arrivals_dir setting round-trips correctly through
+        load_app_settings() and save_app_settings() with a hermetic temp settings file.
+        """
+        from OPTIONS.configuration.settings_store import (
+            load_app_settings, save_app_settings, DEFAULT_APP_SETTINGS, APP_SETTINGS_PATH
+        )
+        import OPTIONS.configuration_option as cfg_opt
+
+        # Temporarily patch APP_SETTINGS_PATH
+        orig_path = cfg_opt.APP_SETTINGS_PATH
+        cfg_opt.APP_SETTINGS_PATH = self.temp_settings_file
+
+        try:
+            # Create a settings dict with a custom arrivals_dir
+            custom_arrivals = os.path.join(self.temp_dir, "my_arrivals")
+            settings = json.loads(json.dumps(DEFAULT_APP_SETTINGS))
+            settings["storage"]["arrivals_dir"] = custom_arrivals
+
+            # Save the settings
+            success = save_app_settings(settings)
+            self.assertTrue(success, "save_app_settings should succeed")
+
+            # Load them back
+            loaded = load_app_settings()
+
+            # Verify arrivals_dir was preserved
+            self.assertIn("arrivals_dir", loaded["storage"])
+            self.assertEqual(
+                loaded["storage"]["arrivals_dir"],
+                custom_arrivals,
+                "arrivals_dir should round-trip correctly"
+            )
+
+        finally:
+            # Restore original APP_SETTINGS_PATH
+            cfg_opt.APP_SETTINGS_PATH = orig_path
+
+    def test_execute_pipeline_with_custom_arrivals_dir(self):
+        """
+        Test 3: execute_offers_pipeline(arrivals_dir=<temp_dir>) correctly
+        discovers a CSV placed in that temp dir (NOT the monkeypatched om.ARRIVALS_FOLDER).
+        """
+        # Monkeypatch om module paths
+        orig_arrivals = om.ARRIVALS_FOLDER
+        orig_final = om.FINAL_FOLDER
+        om.ARRIVALS_FOLDER = os.path.join(self.temp_dir, "unrelated_arrivals")
+        om.FINAL_FOLDER = self.temp_output
+
+        try:
+            # Place a CSV in custom_arrivals (not in the monkeypatched ARRIVALS_FOLDER)
+            csv_path = os.path.join(self.temp_arrivals, "beach_arrivals.csv")
+            create_synthetic_beach_csv(csv_path)
+
+            # Call execute_offers_pipeline with explicit arrivals_dir
+            ok, msg, path = execute_offers_pipeline(arrivals_dir=self.temp_arrivals)
+
+            # Should succeed (discovering CSV in custom arrivals dir)
+            self.assertTrue(ok, f"Pipeline should succeed with explicit arrivals_dir, but got: {msg}")
+            self.assertIn("Success", msg)
+            self.assertIsNotNone(path)
+            self.assertTrue(os.path.exists(path))
+
+        finally:
+            om.ARRIVALS_FOLDER = orig_arrivals
+            om.FINAL_FOLDER = orig_final
+
+    def test_sandy_beach_archival_under_custom_arrivals_dir(self):
+        """
+        Test 4: After a successful execute_offers_pipeline(arrivals_dir=<temp_dir>),
+        the CSV is moved to <temp_dir>/SANDY BEACH/, NOT to om.ARRIVALS_FOLDER/SANDY BEACH/.
+        """
+        # Monkeypatch om module paths to something different
+        orig_arrivals = om.ARRIVALS_FOLDER
+        orig_final = om.FINAL_FOLDER
+        wrong_arrivals = os.path.join(self.temp_dir, "wrong_arrivals")
+        om.ARRIVALS_FOLDER = wrong_arrivals
+        om.FINAL_FOLDER = self.temp_output
+        os.makedirs(wrong_arrivals, exist_ok=True)
+
+        try:
+            # Place a CSV in custom_arrivals
+            csv_path = os.path.join(self.temp_arrivals, "beach_arrivals.csv")
+            create_synthetic_beach_csv(csv_path)
+
+            # Call execute_offers_pipeline with explicit arrivals_dir
+            ok, msg, path = execute_offers_pipeline(arrivals_dir=self.temp_arrivals)
+            self.assertTrue(ok, f"Pipeline should succeed, but got: {msg}")
+
+            # Verify CSV was moved to <custom_arrivals>/SANDY BEACH/, not <wrong_arrivals>/SANDY BEACH/
+            expected_sandy_beach_dir = os.path.join(self.temp_arrivals, "SANDY BEACH")
+            self.assertTrue(
+                os.path.exists(expected_sandy_beach_dir),
+                f"SANDY BEACH dir should exist under custom arrivals dir: {expected_sandy_beach_dir}"
+            )
+
+            # Verify the CSV was actually moved there
+            beach_csvs = glob.glob(os.path.join(expected_sandy_beach_dir, "*.csv"))
+            self.assertEqual(
+                len(beach_csvs),
+                1,
+                f"Should have exactly 1 CSV in SANDY BEACH, got {len(beach_csvs)}"
+            )
+
+            # Verify the CSV is NOT in the wrong arrivals location
+            wrong_sandy_beach_dir = os.path.join(wrong_arrivals, "SANDY BEACH")
+            wrong_csvs = glob.glob(os.path.join(wrong_sandy_beach_dir, "*.csv")) if os.path.exists(wrong_sandy_beach_dir) else []
+            self.assertEqual(
+                len(wrong_csvs),
+                0,
+                f"CSV should NOT be in wrong arrivals location, but found {len(wrong_csvs)}"
+            )
+
+        finally:
+            om.ARRIVALS_FOLDER = orig_arrivals
+            om.FINAL_FOLDER = orig_final
+
+    def test_pipeline_without_arrivals_dir_uses_monkeypatch(self):
+        """
+        Test 5 (backward compatibility): execute_offers_pipeline() called without
+        arrivals_dir parameter should still use om.ARRIVALS_FOLDER (via monkeypatch).
+        This confirms existing tests remain unaffected.
+        """
+        # Monkeypatch om module to use custom paths
+        orig_arrivals = om.ARRIVALS_FOLDER
+        orig_final = om.FINAL_FOLDER
+        om.ARRIVALS_FOLDER = self.temp_arrivals
+        om.FINAL_FOLDER = self.temp_output
+
+        try:
+            # Place a CSV in the monkeypatched ARRIVALS_FOLDER
+            csv_path = os.path.join(self.temp_arrivals, "beach_arrivals.csv")
+            create_synthetic_beach_csv(csv_path)
+
+            # Call execute_offers_pipeline WITHOUT arrivals_dir (should use monkeypatch)
+            ok, msg, path = execute_offers_pipeline()
+            self.assertTrue(ok, f"Pipeline should succeed using monkeypatched ARRIVALS_FOLDER, but got: {msg}")
+
+            # Verify CSV was moved to the monkeypatched SANDY BEACH location
+            expected_sandy_beach_dir = os.path.join(self.temp_arrivals, "SANDY BEACH")
+            beach_csvs = glob.glob(os.path.join(expected_sandy_beach_dir, "*.csv"))
+            self.assertEqual(len(beach_csvs), 1, "CSV should be moved to monkeypatched SANDY BEACH")
+
+        finally:
+            om.ARRIVALS_FOLDER = orig_arrivals
+            om.FINAL_FOLDER = orig_final
 
 
 if __name__ == "__main__":

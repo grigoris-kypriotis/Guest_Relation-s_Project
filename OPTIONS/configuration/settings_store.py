@@ -13,6 +13,7 @@ from typing import Dict, Any
 from MODULES.data_manager import (
     DATABASE_DIR, OUTPUT_DIR, TEMPLATES_DIR, BOOKING_CALLS_DIR,
 )
+from MODULES.offers.paths import ARRIVALS_FOLDER as DEFAULT_ARRIVALS_FOLDER
 
 APP_SETTINGS_PATH = os.path.join(DATABASE_DIR, "app_settings.json")
 
@@ -39,6 +40,7 @@ DEFAULT_APP_SETTINGS: Dict[str, Any] = {
     "storage": {
         "offer_lists_dir": os.path.join(OUTPUT_DIR, "OFFERS"),
         "cake_memos_dir": os.path.join(OUTPUT_DIR, "CAKE_MEMOS"),
+        "arrivals_dir": DEFAULT_ARRIVALS_FOLDER,
     },
     "preferences": {
         "default_fit_view": True,

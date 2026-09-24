@@ -3,6 +3,7 @@
 import os
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QLineEdit, QMessageBox, QFileDialog
 from MODULES.data_manager import OUTPUT_DIR
+from MODULES.offers.paths import ARRIVALS_FOLDER
 from OPTIONS.configuration.card_shared import create_card, btn_browse_style
 
 def build_storage_card(widget) -> QFrame:
@@ -49,6 +50,23 @@ def build_storage_card(widget) -> QFrame:
     row_cakes_dir.addWidget(btn_open_cakes)
     st_layout.addLayout(row_cakes_dir)
 
+    row_arrivals_dir = QHBoxLayout()
+    lbl_arrivals_dir = QLabel("Arrivals Folder:")
+    lbl_arrivals_dir.setFixedWidth(230)
+    lbl_arrivals_dir.setStyleSheet("font-weight: bold; color: #1E293B; border: none;")
+    widget.txt_arrivals_dir = QLineEdit(ARRIVALS_FOLDER)
+    widget.txt_arrivals_dir.setStyleSheet("background-color: #F8F9FA; padding: 4px 8px; border: 1px solid #A7F3D0; border-radius: 4px;")
+    btn_browse_arrivals = QPushButton("Browse")
+    btn_browse_arrivals.setStyleSheet(btn_browse_style)
+    btn_browse_arrivals.clicked.connect(widget._browse_arrivals_dir)
+    btn_open_arrivals = QPushButton("Open")
+    btn_open_arrivals.clicked.connect(lambda: widget._open_folder(widget.txt_arrivals_dir.text()))
+    row_arrivals_dir.addWidget(lbl_arrivals_dir)
+    row_arrivals_dir.addWidget(widget.txt_arrivals_dir)
+    row_arrivals_dir.addWidget(btn_browse_arrivals)
+    row_arrivals_dir.addWidget(btn_open_arrivals)
+    st_layout.addLayout(row_arrivals_dir)
+
     widget.lbl_storage_summary = QLabel("")
     widget.lbl_storage_summary.setStyleSheet("color: #2563EB; font-size: 11px; font-weight: bold; padding-top: 4px; border: none;")
     st_layout.addWidget(widget.lbl_storage_summary)
@@ -56,7 +74,7 @@ def build_storage_card(widget) -> QFrame:
 
 class StorageMixin:
     """Mixin providing document storage directory management methods."""
-    
+
     def _browse_offers_dir(self) -> None:
         """Opens directory chooser for offer lists directory."""
         folder = QFileDialog.getExistingDirectory(self, "Select Offer Lists Output Directory", self.txt_offer_lists_dir.text())
@@ -68,6 +86,12 @@ class StorageMixin:
         folder = QFileDialog.getExistingDirectory(self, "Select Cake Memos Output Directory", self.txt_cake_memos_dir.text())
         if folder:
             self.txt_cake_memos_dir.setText(folder)
+
+    def _browse_arrivals_dir(self) -> None:
+        """Opens directory chooser for arrivals folder."""
+        folder = QFileDialog.getExistingDirectory(self, "Select Arrivals Folder", self.txt_arrivals_dir.text())
+        if folder:
+            self.txt_arrivals_dir.setText(folder)
 
     def _open_folder(self, path: str) -> None:
         """Open a directory in Windows Explorer."""

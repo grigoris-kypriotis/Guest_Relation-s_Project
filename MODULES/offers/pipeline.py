@@ -131,13 +131,15 @@ def resolve_todays_offer_file(offer_lists_dir: Optional[str] = None) -> Optional
     return None
 
 
-def execute_offers_pipeline(selected_csvs=None):
+def execute_offers_pipeline(selected_csvs=None, arrivals_dir: Optional[str] = None):
     """
     Execute the complete offer list generation pipeline.
 
     Args:
         selected_csvs: Optional list of CSV file paths to process.
                       If None, auto-discovers CSV files.
+        arrivals_dir: Optional directory to search for arrivals CSVs.
+                     If None, uses the configured ARRIVALS_FOLDER.
 
     Returns:
         Tuple of (success: bool, message: str, file_path: Optional[str])
@@ -148,17 +150,19 @@ def execute_offers_pipeline(selected_csvs=None):
         if not os.path.exists(facade.TEMPLATE_PATH):
             return False, f"Template missing at {facade.TEMPLATE_PATH}", None
 
+        resolved_arrivals_dir = os.path.abspath(arrivals_dir) if arrivals_dir else facade.ARRIVALS_FOLDER
+
         if selected_csvs is not None:
             csv_files = [os.path.abspath(f) for f in selected_csvs]
         else:
-            csv_files = [os.path.abspath(f) for f in glob.glob(os.path.join(facade.ARRIVALS_FOLDER, "*.csv"))]
+            csv_files = [os.path.abspath(f) for f in glob.glob(os.path.join(resolved_arrivals_dir, "*.csv"))]
             if len(csv_files) != 1:
-                beach_sub = glob.glob(os.path.join(facade.ARRIVALS_FOLDER, "SANDY BEACH", "*.csv"))
+                beach_sub = glob.glob(os.path.join(resolved_arrivals_dir, "SANDY BEACH", "*.csv"))
                 if beach_sub:
                     latest_beach = max(beach_sub, key=os.path.getmtime)
                     csv_files = [os.path.abspath(latest_beach)]
                 else:
-                    sub_csvs = [os.path.abspath(f) for f in glob.glob(os.path.join(facade.ARRIVALS_FOLDER, "**", "*.csv"), recursive=True)]
+                    sub_csvs = [os.path.abspath(f) for f in glob.glob(os.path.join(resolved_arrivals_dir, "**", "*.csv"), recursive=True)]
                     if len(sub_csvs) == 1:
                         csv_files = sub_csvs
 
@@ -176,7 +180,7 @@ def execute_offers_pipeline(selected_csvs=None):
         beach_data, _, all_arrivals = extract_excel_data(beach_csv)
         minibar_data = []
 
-        beach_dir = os.path.abspath(os.path.join(facade.ARRIVALS_FOLDER, "SANDY BEACH"))
+        beach_dir = os.path.abspath(os.path.join(resolved_arrivals_dir, "SANDY BEACH"))
         os.makedirs(beach_dir, exist_ok=True)
 
         dest_beach = os.path.abspath(os.path.join(beach_dir, os.path.basename(beach_csv)))

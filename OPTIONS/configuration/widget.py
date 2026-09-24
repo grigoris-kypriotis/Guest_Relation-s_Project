@@ -66,6 +66,8 @@ class ConfigurationWidget(QWidget, IngestionMixin, LocationsMixin, ExclusiviMixi
         storage = s.get("storage", {})
         self.txt_offer_lists_dir.setText(str(storage.get("offer_lists_dir", os.path.join(OUTPUT_DIR, "OFFERS"))))
         self.txt_cake_memos_dir.setText(str(storage.get("cake_memos_dir", os.path.join(OUTPUT_DIR, "CAKE_MEMOS"))))
+        from MODULES.offers.paths import ARRIVALS_FOLDER
+        self.txt_arrivals_dir.setText(str(storage.get("arrivals_dir", ARRIVALS_FOLDER)))
         prefs = s.get("preferences", {})
         self.chk_fit_view.setChecked(bool(prefs.get("default_fit_view", True)))
         self.combo_prop.setCurrentIndex(0)
@@ -81,7 +83,7 @@ class ConfigurationWidget(QWidget, IngestionMixin, LocationsMixin, ExclusiviMixi
             "paths": {"database_dir": self.txt_database_dir.text().strip(), "templates_dir": self.txt_templates_dir.text().strip(), "booking_calls_workbook": self.txt_booking_calls_path.text().strip()},
             "booking_calls": {"sheet_name": self.txt_sheet_name.text().strip(), "mirror_follow_up_1": self.chk_mirror_sheet.isChecked()},
             "exclusivi": {"enabled": self.chk_exclusivi_enabled.isChecked(), "api_base_url": self.txt_exclusivi_url.text().strip(), "api_key": self.txt_exclusivi_key.text().strip(), "last_test_status": self.current_settings.get("exclusivi", {}).get("last_test_status"), "last_test_timestamp": self.current_settings.get("exclusivi", {}).get("last_test_timestamp")},
-            "storage": {"offer_lists_dir": self.txt_offer_lists_dir.text().strip(), "cake_memos_dir": self.txt_cake_memos_dir.text().strip()},
+            "storage": {"offer_lists_dir": self.txt_offer_lists_dir.text().strip(), "cake_memos_dir": self.txt_cake_memos_dir.text().strip(), "arrivals_dir": self.txt_arrivals_dir.text().strip()},
             "preferences": {"default_fit_view": self.chk_fit_view.isChecked(), "active_property": self.combo_prop.currentText(), "operational_mode": self.combo_mode.currentText()},
         }
 

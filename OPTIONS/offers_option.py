@@ -161,14 +161,16 @@ class OffersOptionWidget(QWidget):
             self.office_viewer.close_file()
             self.repaint()
 
-            pipeline_status, msg, final_path = execute_offers_pipeline()
+            arrivals_dir = load_app_settings().get("storage", {}).get("arrivals_dir")
+            pipeline_status, msg, final_path = execute_offers_pipeline(arrivals_dir=arrivals_dir)
 
             if not pipeline_status and msg == "MISSING_CSVS":
                 self._log("Missing CSV in ARRIVALS. Prompting file selector...", "WARNING")
-                selected_file, _ = QFileDialog.getOpenFileName(self, "Select today's arrivals CSV", ARRIVALS_FOLDER, "CSV (*.csv)")
+                dialog_start_dir = arrivals_dir or ARRIVALS_FOLDER
+                selected_file, _ = QFileDialog.getOpenFileName(self, "Select today's arrivals CSV", dialog_start_dir, "CSV (*.csv)")
                 if selected_file:
                     self._log(f"User selected CSV file: {os.path.basename(selected_file)}")
-                    pipeline_status, msg, final_path = execute_offers_pipeline(selected_csvs=[selected_file])
+                    pipeline_status, msg, final_path = execute_offers_pipeline(selected_csvs=[selected_file], arrivals_dir=arrivals_dir)
                 else:
                     self._log("Requirement: exactly 1 CSV file. Operation aborted.", "ERROR")
                     return
