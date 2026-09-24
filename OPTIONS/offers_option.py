@@ -9,15 +9,18 @@ import os
 from typing import Optional, Callable
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QFrame, QFileDialog, QMessageBox
+    QWidget, QVBoxLayout, QLabel, QFrame, QFileDialog, QMessageBox, QPushButton, QHBoxLayout
 )
 from PyQt6.QtCore import pyqtSignal
 
 from MODULES.offers_module import (
-    execute_offers_pipeline, get_todays_offer_list,
-    duplicate_for_update, ARRIVALS_FOLDER
+    execute_offers_pipeline,
+    duplicate_for_update, resolve_todays_offer_file, ARRIVALS_FOLDER
 )
+from MODULES.offers.pipeline import get_last_record_failures
+from MODULES.common.fb_email_recipients import TO_RECIPIENTS, CC_RECIPIENTS
 from OPTIONS._shared_widgets import OfficeViewer
+from OPTIONS.configuration_option import load_app_settings
 
 
 class OffersOptionWidget(QWidget):
@@ -25,11 +28,13 @@ class OffersOptionWidget(QWidget):
     Offers view: document viewer container with create/update pipeline,
     save/close lifecycle, and status label.
     """
-    task_generated = pyqtSignal(str, dict)
 
-    def __init__(self, log_callback: Optional[Callable] = None, parent: Optional[QWidget] = None):
+    navigate_to_config = pyqtSignal()
+
+    def __init__(self, log_callback: Optional[Callable] = None, todo_widget=None, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.log_callback = log_callback
+        self.todo_widget = todo_widget
         self.is_update_mode = False
         self._init_ui()
 
@@ -57,8 +62,73 @@ class OffersOptionWidget(QWidget):
         oc_layout.addWidget(self.offers_status)
 
         self.office_viewer = OfficeViewer()
-        self.office_viewer.file_saved_and_closed.connect(self._handle_save_and_close)
         oc_layout.addWidget(self.office_viewer, stretch=1)
+
+        # No Arrivals Panel
+        self.no_arrivals_panel = QFrame()
+        self.no_arrivals_panel.setObjectName("NoArrivalsPanel")
+        self.no_arrivals_panel.setStyleSheet("""
+            #NoArrivalsPanel {
+                background-color: #FFF5F7;
+                border: 2px solid #f43f5e;
+                border-radius: 6px;
+                padding: 12px;
+            }
+        """)
+        panel_layout = QVBoxLayout(self.no_arrivals_panel)
+        panel_layout.setContentsMargins(12, 12, 12, 12)
+        panel_layout.setSpacing(12)
+
+        panel_label = QLabel("No arrivals list was found for today.\n\nConfigure the Arrivals Folder in Settings, or locate the file manually.")
+        panel_label.setWordWrap(True)
+        panel_label.setStyleSheet("color: #333333; font-size: 12px;")
+        panel_layout.addWidget(panel_label)
+
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(8)
+
+        self.btn_goto_config = QPushButton("Go to Configuration")
+        self.btn_goto_config.setStyleSheet("""
+            QPushButton {
+                background-color: #f43f5e;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #e63946;
+            }
+        """)
+        button_layout.addWidget(self.btn_goto_config)
+
+        self.btn_browse_arrivals = QPushButton("Browse for File…")
+        self.btn_browse_arrivals.setStyleSheet("""
+            QPushButton {
+                background-color: #FFB6C1;
+                color: #333333;
+                border: 1px solid #f43f5e;
+                border-radius: 4px;
+                padding: 8px 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #FFA0AD;
+            }
+        """)
+        button_layout.addWidget(self.btn_browse_arrivals)
+
+        button_layout.addStretch()
+        panel_layout.addLayout(button_layout)
+        panel_layout.addStretch()
+
+        oc_layout.addWidget(self.no_arrivals_panel, stretch=1)
+        self.no_arrivals_panel.hide()
+
+        # Wire button handlers
+        self.btn_goto_config.clicked.connect(self._handle_goto_config)
+        self.btn_browse_arrivals.clicked.connect(self._handle_browse_for_arrivals)
 
         offers_layout.addWidget(offers_container)
 
@@ -66,15 +136,44 @@ class OffersOptionWidget(QWidget):
         if self.log_callback:
             self.log_callback("OFFERS", message, level)
 
+    def _refresh_button_states(self) -> None:
+        """
+        Refresh the enabled/disabled state of the Create and Send Email buttons
+        based on whether today's offer file already exists.
+        """
+        offer_lists_dir = load_app_settings().get("storage", {}).get("offer_lists_dir")
+        exists = resolve_todays_offer_file(offer_lists_dir=offer_lists_dir) is not None
+        self.btn_create.setEnabled(not exists)
+        self.btn_send_email.setEnabled(exists)
+
+    def _show_no_arrivals_panel(self) -> None:
+        """Show the no-arrivals panel and hide the office viewer."""
+        self.office_viewer.hide()
+        self.no_arrivals_panel.show()
+
+    def _hide_no_arrivals_panel(self) -> None:
+        """Hide the no-arrivals panel and show the office viewer."""
+        self.no_arrivals_panel.hide()
+        self.office_viewer.show()
+
     # ----- Document lifecycle -----
 
     def handle_doc_save(self) -> None:
-        """Save the currently open document."""
+        """Save the currently open document. In update mode, also creates a new UPDATED variant."""
         try:
             self.offers_status.hide()
             self.office_viewer.save_file()
-            if self.office_viewer.current_filepath:
-                self._log(f"Document saved: {os.path.basename(self.office_viewer.current_filepath)}")
+            if not self.office_viewer.current_filepath:
+                return
+            self._log(f"Document saved: {os.path.basename(self.office_viewer.current_filepath)}")
+            if self.is_update_mode:
+                try:
+                    new_path = duplicate_for_update(self.office_viewer.current_filepath)
+                    self._log(f"Update saved as: {os.path.basename(new_path)}", "SUCCESS")
+                except Exception as e:
+                    self._log(f"Update save error: {e}", "ERROR")
+                    return
+                self._refresh_button_states()
         except Exception as e:
             self._log(f"Save error: {e}", "ERROR")
 
@@ -88,46 +187,114 @@ class OffersOptionWidget(QWidget):
         except Exception as e:
             self._log(f"Close error: {e}", "ERROR")
 
-    def handle_doc_save_and_close(self) -> None:
-        """Trigger save and close on the OfficeViewer."""
-        self.office_viewer.save_and_close()
+    def _handle_outlook_error(self, error: Exception) -> None:
+        """Callback for Outlook draft errors from manual_draft_outlook()."""
+        self._log(f"Outlook draft error: {error}", "ERROR")
+
+    def handle_send_email(self) -> None:
+        """Resolves today's offer file, opens an Outlook draft (display-only, never auto-sent),
+        and reuses/creates the 'Send Offerlist Email' To-Do task."""
+        try:
+            offer_lists_dir = load_app_settings().get("storage", {}).get("offer_lists_dir")
+            file_path = resolve_todays_offer_file(offer_lists_dir=offer_lists_dir)
+            if not file_path:
+                self._log("No offer list found for today. Send Email unavailable.", "ERROR")
+                return
+            if self.todo_widget is None:
+                self._log("To-Do list unavailable; cannot create/send task.", "ERROR")
+                return
+            payload = self._generate_offers_payload(file_path)
+            task_id = self.todo_widget.get_or_create_task("Send Offerlist Email", payload)
+            task_widget = self.todo_widget.active_tasks.get(task_id)
+            if task_widget:
+                draft_failure = {}
+
+                def _on_draft_error(error: Exception) -> None:
+                    draft_failure["error"] = error
+                    self._handle_outlook_error(error)
+
+                task_widget.manual_draft_outlook(error_callback=_on_draft_error)
+                if "error" not in draft_failure:
+                    self._log(f"Outlook draft opened for: {os.path.basename(file_path)}", "SUCCESS")
+            else:
+                self._log("Task created but widget reference not found — draft not opened.", "ERROR")
+        except Exception as e:
+            self._log(f"Send Email error: {e}", "ERROR")
 
     # ----- Pipeline actions -----
+
+    def _finish_pipeline_result(self, pipeline_status: bool, msg: str, final_path) -> None:
+        """
+        Handle the result of a pipeline execution.
+        Logs the result, record failures, and opens the document if successful.
+        """
+        level = "SUCCESS" if pipeline_status else "ERROR"
+        self._log(msg, level)
+
+        # Log individual record write failures if any
+        record_failures = get_last_record_failures()
+        for booking_id, error in record_failures:
+            self._log(f"Record write failed for booking {booking_id}: {error}", "ERROR")
+
+        if pipeline_status and final_path:
+            self._log(f"Opening generated document in OfficeViewer: {os.path.basename(final_path)}")
+            self.office_viewer.open_file(final_path)
+            # Refresh button states to reflect that today's file now exists
+            self._refresh_button_states()
 
     def run_offers_creation(self) -> None:
         """Execute the Create Offerlist pipeline."""
         try:
             self.offers_status.hide()
+            self._hide_no_arrivals_panel()
             self.is_update_mode = False
             self._log("Action: Create Offerlist triggered")
 
-            if get_todays_offer_list() is not None:
-                self._log("Today's offer list already exists. Operation denied. Use UPDATE Offerlist.", "WARNING")
+            # Defensive guard: today's file should not already exist (button should be disabled, but check anyway)
+            offer_lists_dir = load_app_settings().get("storage", {}).get("offer_lists_dir")
+            if resolve_todays_offer_file(offer_lists_dir=offer_lists_dir) is not None:
+                self._log("Today's offer list already exists. Operation denied. Use UPDATE Offerlist.", "ERROR")
                 return
 
             self._log("Processing Data... Please wait.")
             self.office_viewer.close_file()
             self.repaint()
 
-            pipeline_status, msg, final_path = execute_offers_pipeline()
+            arrivals_dir = load_app_settings().get("storage", {}).get("arrivals_dir")
+            pipeline_status, msg, final_path = execute_offers_pipeline(arrivals_dir=arrivals_dir)
 
             if not pipeline_status and msg == "MISSING_CSVS":
-                self._log("Missing CSV in ARRIVALS. Prompting file selector...", "WARNING")
-                selected_file, _ = QFileDialog.getOpenFileName(self, "Select today's arrivals CSV", ARRIVALS_FOLDER, "CSV (*.csv)")
-                if selected_file:
-                    self._log(f"User selected CSV file: {os.path.basename(selected_file)}")
-                    pipeline_status, msg, final_path = execute_offers_pipeline(selected_csvs=[selected_file])
-                else:
-                    self._log("Requirement: exactly 1 CSV file. Operation aborted.", "ERROR")
-                    return
+                self._log("No arrivals list found for today.", "WARNING")
+                self._show_no_arrivals_panel()
+                return
 
-            level = "SUCCESS" if pipeline_status else "ERROR"
-            self._log(msg, level)
-            if pipeline_status and final_path:
-                self._log(f"Opening generated document in OfficeViewer: {os.path.basename(final_path)}")
-                self.office_viewer.open_file(final_path)
+            self._finish_pipeline_result(pipeline_status, msg, final_path)
         except Exception as e:
             self._log(f"Creation pipeline error: {e}", "ERROR")
+
+    def _handle_goto_config(self) -> None:
+        """Handle 'Go to Configuration' button click."""
+        self._hide_no_arrivals_panel()
+        self.navigate_to_config.emit()
+
+    def _handle_browse_for_arrivals(self) -> None:
+        """Handle 'Browse for File' button click."""
+        try:
+            self._hide_no_arrivals_panel()
+            arrivals_dir = load_app_settings().get("storage", {}).get("arrivals_dir")
+            browse_start = arrivals_dir or ARRIVALS_FOLDER
+            selected_file, _ = QFileDialog.getOpenFileName(self, "Select today's arrivals CSV", browse_start, "CSV (*.csv)")
+            if not selected_file:
+                self._log("Requirement: exactly 1 CSV file. Operation aborted.", "ERROR")
+                return
+            self._log(f"User selected CSV file: {os.path.basename(selected_file)}")
+            pipeline_status, msg, final_path = execute_offers_pipeline(selected_csvs=[selected_file], arrivals_dir=arrivals_dir)
+            if not pipeline_status and msg == "MISSING_CSVS":
+                self._show_no_arrivals_panel()
+                return
+            self._finish_pipeline_result(pipeline_status, msg, final_path)
+        except Exception as e:
+            self._log(f"Browse/creation error: {e}", "ERROR")
 
     def run_offers_update(self) -> None:
         """Execute the UPDATE Offerlist pipeline."""
@@ -138,7 +305,9 @@ class OffersOptionWidget(QWidget):
             self._log("Searching for today's file...")
             self.repaint()
 
-            file_path = get_todays_offer_list()
+            # Read offer_lists_dir from settings
+            offer_lists_dir = load_app_settings().get("storage", {}).get("offer_lists_dir")
+            file_path = resolve_todays_offer_file(offer_lists_dir=offer_lists_dir)
             if file_path:
                 self._log(f"File located. Mode: UPDATE. Target: {os.path.basename(file_path)}", "SUCCESS")
                 self.office_viewer.open_file(file_path)
@@ -154,54 +323,101 @@ class OffersOptionWidget(QWidget):
           Dear all,<br>Kindly find attached the Offerlist.<br><br>
           For any further information don't hesitate to contact the Guest Relations Team.
         </div>"""
-        
+
         return {
             "type": "outlook_draft",
             "category": "Offer",
             "subcategory": "Offer List",
             "is_service_trace": True,
             "data": {
-                "To": "Operation Manager <Mariela.Tsvetkova@rizosresorts.gr>; Rooms Division Manager - Sandy Beach <harrys.palikiras@rizosresorts.gr>; Front Office Manager Sandy Beach <fom.sandy@rizosresorts.gr>;",
-                "CC": "Guest Relations Sandy Beach <guest.sandybeach@rizosresorts.gr>;",
+                "To": TO_RECIPIENTS,
+                "CC": CC_RECIPIENTS,
                 "Subject": subject,
                 "HTMLBody": html_body,
                 "Attachment": filepath
             }
         }
 
-    def _handle_save_and_close(self, filepath: str) -> None:
-        """
-        Offerlist Save & Close Handler:
-        Strictly saves/updates the Word document in OUTPUT/OFFERS/.
-        Routes the task to generate an Outlook email to the To-Do list.
-        """
-        try:
-            self.offers_status.hide()
-            final_path = filepath
-            if self.is_update_mode:
-                self._log(f"Saving updated offerlist: {os.path.basename(filepath)}")
-                try:
-                    new_path = duplicate_for_update(filepath)
-                    self._log(f"Offerlist updated & saved successfully: {os.path.basename(new_path)}", "SUCCESS")
-                    final_path = new_path
-                except Exception as e:
-                    self._log(f"Update save error: {e}", "ERROR")
-                    return
-            else:
-                self._log(f"Offerlist saved successfully: {os.path.basename(filepath)}", "SUCCESS")
-                
-            payload = self._generate_offers_payload(final_path)
-            self.task_generated.emit(f"Send Offerlist Email", payload)
-            
-            QMessageBox.information(
-                self, 
-                "Saved", 
-                f"Offerlist saved successfully:\n{os.path.basename(final_path)}\n\n"
-                f"A task to send the Outlook email has been added to the To-Do List."
-            )
-        except Exception as e:
-            self._log(f"Save and close error: {e}", "ERROR")
-
     def activate(self) -> None:
-        """Called when this option is selected from the menu."""
-        pass  # Offers view is stateful — no auto-refresh needed
+        """Called when this option is selected from the menu. Refresh button states."""
+        self._refresh_button_states()
+
+    def build_submenu(self) -> QWidget:
+        """Constructs the OFFERS sidebar submenu, wires its buttons to this widget's own handlers, and returns it."""
+        submenu = QWidget()
+        submenu.setObjectName("OffersSubmenuContainer")
+        submenu_layout = QVBoxLayout(submenu)
+        submenu_layout.setContentsMargins(12, 8, 4, 8)
+        submenu_layout.setSpacing(3)
+        submenu.setStyleSheet("""
+            #OffersSubmenuContainer {
+                background-color: #F7F7F7;
+                border-left: 4px solid #FF6B9D;
+                border-radius: 0px 4px 4px 0px;
+            }
+            QPushButton {
+                background-color: #FFE4E1;
+                border: 1px solid #FFB6C1;
+                border-radius: 3px;
+                padding: 6px 8px 6px 10px;
+                text-align: left;
+                font-size: 11px;
+                font-weight: bold;
+                color: black;
+                margin: 1px 0px;
+            }
+            QPushButton:hover { background-color: #FF69B4; color: white; }
+            QPushButton:disabled {
+                background-color: #D3D3D3;
+                border: 1px solid #A9A9A9;
+                color: #777777;
+            }
+        """)
+
+        self.btn_create = QPushButton("Create Offerlist")
+        self.btn_update = QPushButton("UPDATE Offerlist")
+        self.btn_save = QPushButton("SAVE")
+        self.btn_close = QPushButton("CLOSE")
+        self.btn_send_email = QPushButton("Send Email")
+
+        blue_sub_style = """
+            QPushButton {
+                background-color: #B0E0E6;
+                border: 1px solid #4682B4;
+                border-radius: 3px;
+                padding: 6px 8px 6px 10px;
+                text-align: left;
+                font-size: 11px;
+                font-weight: bold;
+                color: #0F3460;
+                margin: 1px 0px;
+            }
+            QPushButton:hover { background-color: #4682B4; color: white; }
+            QPushButton:disabled {
+                background-color: #B8D4E8;
+                border: 1px solid #8BA9C8;
+                color: #5A7FA0;
+            }
+        """
+        self.btn_save.setStyleSheet(blue_sub_style)
+        self.btn_close.setStyleSheet(blue_sub_style)
+        self.btn_send_email.setStyleSheet(blue_sub_style)
+
+        self.btn_create.clicked.connect(self.run_offers_creation)
+        self.btn_update.clicked.connect(self.run_offers_update)
+        self.btn_save.clicked.connect(self.handle_doc_save)
+        self.btn_close.clicked.connect(self.handle_doc_close)
+        self.btn_send_email.clicked.connect(self.handle_send_email)
+
+        submenu_layout.addWidget(self.btn_create)
+        submenu_layout.addWidget(self.btn_update)
+        submenu_layout.addSpacing(14)
+        submenu_layout.addWidget(self.btn_save)
+        submenu_layout.addWidget(self.btn_close)
+        submenu_layout.addWidget(self.btn_send_email)
+        submenu.hide()
+
+        # Refresh button states so the Create/Send Email buttons start in the correct state
+        self._refresh_button_states()
+
+        return submenu

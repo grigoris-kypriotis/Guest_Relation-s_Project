@@ -1,14 +1,8 @@
 """
-Shared UI Widgets: Infrastructure-level components used across multiple option modules.
+Shared UI Widgets Package: Infrastructure-level components used across multiple option modules.
 =====================================================================================
-Façade module maintaining 100% backward-compatible API access for all callers.
-Delegates to modular subpackages in OPTIONS._shared/:
-  - OPTIONS._shared.nav (HamburgerButton, Sidebar)
-  - OPTIONS._shared.task_widget (TaskWidget)
-  - OPTIONS._shared.office_viewer (OfficeViewer)
-  - OPTIONS._shared.workspace_viewer (WorkspaceViewerDialog)
-  - OPTIONS._shared.chart_card (ChartCardWidget, _with_alpha)
-  - OPTIONS._shared.mpl_helpers (WheelPassThroughFilter, NonScrollableFigureCanvas)
+Extracted from the original monolithic _shared_widgets.py to comply with file size limits.
+Contains no business logic — only UI structure and COM/Office integration.
 """
 
 from OPTIONS._shared.nav import HamburgerButton, Sidebar

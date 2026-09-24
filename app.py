@@ -81,9 +81,9 @@ class GuestRelationApp(QMainWindow):
         self.plot_widget = PlotViewerWidget()
         self.moves_widget = MovesWidget()
         self.todo_widget = TodoWidget(log_callback=log_cb)
-        self.offers_widget = OffersOptionWidget(log_callback=log_cb)
+        self.offers_widget = OffersOptionWidget(log_callback=log_cb, todo_widget=self.todo_widget)
         self.allergies_widget = AllergiesWidget()
-        self.cake_widget = CakeMemoOptionWidget(log_callback=log_cb)
+        self.cake_widget = CakeMemoOptionWidget(log_callback=log_cb, todo_widget=self.todo_widget)
         self.booking_widget = BookingCallsOptionWidget(log_callback=log_cb)
         self.system_data_widget = SystemDataOptionWidget()
 
@@ -103,10 +103,6 @@ class GuestRelationApp(QMainWindow):
             "LOGS":        self.logs_widget,
         }
 
-        # Route generated tasks to TodoWidget
-        self.cake_widget.task_generated.connect(self.todo_widget.add_task_auto)
-        self.offers_widget.task_generated.connect(self.todo_widget.add_task_auto)
-
         # -----------------------------------------------------------------
         # Sidebar setup
         # -----------------------------------------------------------------
@@ -117,95 +113,14 @@ class GuestRelationApp(QMainWindow):
         self.btn_todo = QPushButton("To Do List")
         self.btn_offers = QPushButton("OFFERS")
 
-        # Sub-Menu for OFFERS
-        self.offers_submenu = QWidget()
-        offers_submenu_layout = QVBoxLayout(self.offers_submenu)
-        offers_submenu_layout.setContentsMargins(0, 4, 0, 6)
-        offers_submenu_layout.setSpacing(5)
-        self.offers_submenu.setStyleSheet("""
-            QWidget { background-color: transparent; }
-            QPushButton {
-                background-color: #FFE4E1;
-                border: 1px solid #FFB6C1;
-                border-radius: 4px;
-                padding: 7px 10px 7px 20px;
-                text-align: left;
-                font-size: 11px;
-                font-weight: bold;
-                color: black;
-                margin-bottom: 2px;
-            }
-            QPushButton:hover { background-color: #FF69B4; color: white; }
-        """)
-
-        self.offers_btn_create = QPushButton("Create Offerlist")
-        self.offers_btn_update = QPushButton("UPDATE Offerlist")
-        self.btn_save = QPushButton("SAVE")
-        self.btn_close = QPushButton("CLOSE")
-        self.btn_save_close = QPushButton("SAVE & CLOSE")
-
-        blue_sub_style = """
-            QPushButton {
-                background-color: #B0E0E6;
-                border: 1px solid #4682B4;
-                border-radius: 4px;
-                padding: 7px 10px 7px 20px;
-                text-align: left;
-                font-size: 11px;
-                font-weight: bold;
-                color: #0F3460;
-                margin-bottom: 2px;
-            }
-            QPushButton:hover { background-color: #4682B4; color: white; }
-        """
-        self.btn_save.setStyleSheet(blue_sub_style)
-        self.btn_close.setStyleSheet(blue_sub_style)
-        self.btn_save_close.setStyleSheet(blue_sub_style)
-
-        self.offers_btn_create.clicked.connect(self.offers_widget.run_offers_creation)
-        self.offers_btn_update.clicked.connect(self.offers_widget.run_offers_update)
-        self.btn_save.clicked.connect(self.offers_widget.handle_doc_save)
-        self.btn_close.clicked.connect(self.offers_widget.handle_doc_close)
-        self.btn_save_close.clicked.connect(self.offers_widget.handle_doc_save_and_close)
-
-        offers_submenu_layout.addWidget(self.offers_btn_create)
-        offers_submenu_layout.addWidget(self.offers_btn_update)
-        offers_submenu_layout.addSpacing(14)
-        offers_submenu_layout.addWidget(self.btn_save)
-        offers_submenu_layout.addWidget(self.btn_close)
-        offers_submenu_layout.addWidget(self.btn_save_close)
-        self.offers_submenu.hide()
+        # Build OFFERS submenu
+        self.offers_submenu = self.offers_widget.build_submenu()
 
         self.btn_allergies = QPushButton("ALLERGIES")
         self.btn_cake = QPushButton("CAKE MEMOS")
 
-        # Sub-Menu for CAKE MEMOS
-        self.cake_submenu = QWidget()
-        cake_submenu_layout = QVBoxLayout(self.cake_submenu)
-        cake_submenu_layout.setContentsMargins(0, 4, 0, 6)
-        cake_submenu_layout.setSpacing(5)
-        self.cake_submenu.setStyleSheet(self.offers_submenu.styleSheet())
-
-        self.btn_cake_open_tpl = QPushButton("Open Cake Memo Template")
-        self.btn_cake_save = QPushButton("SAVE")
-        self.btn_cake_close = QPushButton("CLOSE")
-        self.btn_cake_save_close = QPushButton("SAVE & CLOSE (Outlook Draft)")
-
-        self.btn_cake_save.setStyleSheet(blue_sub_style)
-        self.btn_cake_close.setStyleSheet(blue_sub_style)
-        self.btn_cake_save_close.setStyleSheet(blue_sub_style)
-
-        self.btn_cake_open_tpl.clicked.connect(self.cake_widget.open_cake_memo_template)
-        self.btn_cake_save.clicked.connect(self.cake_widget.handle_cake_save)
-        self.btn_cake_close.clicked.connect(self.cake_widget.handle_cake_close)
-        self.btn_cake_save_close.clicked.connect(self.cake_widget.handle_cake_save_and_close)
-
-        cake_submenu_layout.addWidget(self.btn_cake_open_tpl)
-        cake_submenu_layout.addSpacing(14)
-        cake_submenu_layout.addWidget(self.btn_cake_save)
-        cake_submenu_layout.addWidget(self.btn_cake_close)
-        cake_submenu_layout.addWidget(self.btn_cake_save_close)
-        self.cake_submenu.hide()
+        # Build CAKE MEMOS submenu
+        self.cake_submenu = self.cake_widget.build_submenu()
 
         self.btn_booking = QPushButton("BOOKING CALLS")
 
@@ -236,7 +151,6 @@ class GuestRelationApp(QMainWindow):
         self.action_manifest = self.popout_menu.addAction("Guest Manifest")
         self.action_stats = self.popout_menu.addAction("Stats")
         self.action_plot = self.popout_menu.addAction("Plot")
-        self.action_moves = self.popout_menu.addAction("Room Moves")
         self.action_config = self.popout_menu.addAction("Configuration")
         self.action_system_data = self.popout_menu.addAction("System Data Records")
         self.action_logs = self.popout_menu.addAction("Logs")
@@ -244,7 +158,6 @@ class GuestRelationApp(QMainWindow):
         self.action_manifest.triggered.connect(lambda: self.select_category("MANIFEST"))
         self.action_stats.triggered.connect(lambda: self.select_category("STATS"))
         self.action_plot.triggered.connect(lambda: self.select_category("PLOT"))
-        self.action_moves.triggered.connect(lambda: self.select_category("MOVES"))
         self.action_config.triggered.connect(lambda: self.select_category("CONFIG"))
         self.action_system_data.triggered.connect(lambda: self.select_category("SYSTEM_DATA"))
         self.action_logs.triggered.connect(lambda: self.select_category("LOGS"))
@@ -301,6 +214,7 @@ class GuestRelationApp(QMainWindow):
         self.config_widget.data_updated.connect(self.booking_widget.refresh_calls)
         self.config_widget.data_updated.connect(self.plot_widget.refresh_plot)
         self.booking_widget.feedback_submitted.connect(self.handle_booking_feedback_to_todo)
+        self.offers_widget.navigate_to_config.connect(lambda: self.select_category("CONFIG"))
 
         main_layout.addWidget(self.sidebar)
         main_layout.addWidget(self.stacked_content)
@@ -380,7 +294,7 @@ class GuestRelationApp(QMainWindow):
             btn.style().unpolish(btn)
             btn.style().polish(btn)
 
-        is_popout_active = self.active_category in ["MANIFEST", "STATS", "PLOT", "MOVES", "CONFIG", "SYSTEM_DATA", "LOGS"]
+        is_popout_active = self.active_category in ["MANIFEST", "STATS", "PLOT", "CONFIG", "SYSTEM_DATA", "LOGS"]
         self.sidebar.btn_hamburger.setProperty("active", is_popout_active)
         self.sidebar.btn_hamburger.style().unpolish(self.sidebar.btn_hamburger)
         self.sidebar.btn_hamburger.style().polish(self.sidebar.btn_hamburger)

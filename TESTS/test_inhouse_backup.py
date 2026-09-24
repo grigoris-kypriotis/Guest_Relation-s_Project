@@ -53,10 +53,10 @@ class TestInHouseBackup(unittest.TestCase):
 
         rep_date = date(2025, 6, 1)
 
-        with patch("OPTIONS.configuration_option.QFileDialog.getOpenFileName", return_value=(self.sample_csv_path, "")), \
-             patch("OPTIONS.configuration_option.extract_inhouse_report_date", return_value=(rep_date, "01/06/2025 10:00")), \
-             patch("OPTIONS.configuration_option.DATA_BACKUP_DIR", self.temp_backup_dir), \
-             patch("OPTIONS.configuration_option.QMessageBox.question", return_value=16384):  # QMessageBox.StandardButton.Yes
+        with patch("OPTIONS.configuration.card_ingestion.QFileDialog.getOpenFileName", return_value=(self.sample_csv_path, "")), \
+             patch("OPTIONS.configuration.card_ingestion.extract_inhouse_report_date", return_value=(rep_date, "01/06/2025 10:00")), \
+             patch("OPTIONS.configuration.card_ingestion.DATA_BACKUP_DIR", self.temp_backup_dir), \
+             patch("OPTIONS.configuration.card_ingestion.QMessageBox.question", return_value=16384):  # QMessageBox.StandardButton.Yes
             widget.load_inhouse_list()
 
         # Verify exactly one file created in backup dir
@@ -95,11 +95,11 @@ class TestInHouseBackup(unittest.TestCase):
         signal_emitted = []
         widget.data_updated.connect(lambda: signal_emitted.append(True))
 
-        with patch("OPTIONS.configuration_option.QFileDialog.getOpenFileName", return_value=(self.sample_csv_path, "")), \
-             patch("OPTIONS.configuration_option.extract_inhouse_report_date", return_value=(rep_date, "01/06/2025 10:00")), \
-             patch("OPTIONS.configuration_option.DATA_BACKUP_DIR", self.temp_backup_dir), \
-             patch("OPTIONS.configuration_option.shutil.copy2", side_effect=PermissionError("Simulated backup failure")), \
-             patch("OPTIONS.configuration_option.QMessageBox.question", return_value=16384):
+        with patch("OPTIONS.configuration.card_ingestion.QFileDialog.getOpenFileName", return_value=(self.sample_csv_path, "")), \
+             patch("OPTIONS.configuration.card_ingestion.extract_inhouse_report_date", return_value=(rep_date, "01/06/2025 10:00")), \
+             patch("OPTIONS.configuration.card_ingestion.DATA_BACKUP_DIR", self.temp_backup_dir), \
+             patch("OPTIONS.configuration.card_ingestion.shutil.copy2", side_effect=PermissionError("Simulated backup failure")), \
+             patch("OPTIONS.configuration.card_ingestion.QMessageBox.question", return_value=16384):
             # Must not raise
             try:
                 widget.load_inhouse_list()

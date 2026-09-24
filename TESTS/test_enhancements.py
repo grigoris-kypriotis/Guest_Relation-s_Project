@@ -422,15 +422,22 @@ class TestEnhancementsSuite(unittest.TestCase):
         self.assertTrue(app_win.sidebar.btn_hamburger.property("active"))
         app_win.close()
 
-    def test_room_moves_menu_action_and_navigation(self):
+    def test_room_moves_menu_action_removed(self):
+        """Verify that Room Moves popout menu action has been removed while MovesWidget remains."""
         app_win = GuestRelationApp()
-        self.assertIsNotNone(app_win.action_moves)
-        self.assertEqual(app_win.action_moves.text(), "Room Moves")
-        
-        # Triggering the action switches stacked_content to moves_widget
-        app_win.action_moves.trigger()
-        self.assertIs(app_win.stacked_content.currentWidget(), app_win.moves_widget)
-        self.assertTrue(app_win.sidebar.btn_hamburger.property("active"))
+
+        # Verify action_moves no longer exists
+        self.assertFalse(hasattr(app_win, "action_moves"))
+
+        # Verify "Room Moves" is not in popout menu actions
+        popout_actions = [action.text() for action in app_win.popout_menu.actions()]
+        self.assertNotIn("Room Moves", popout_actions)
+
+        # Verify MovesWidget is still instantiated and registered
+        self.assertIsNotNone(app_win.moves_widget)
+        self.assertIn("MOVES", app_win.option_widgets)
+        self.assertIs(app_win.option_widgets["MOVES"], app_win.moves_widget)
+
         app_win.close()
 
     # -------------------------------------------------------------------------
