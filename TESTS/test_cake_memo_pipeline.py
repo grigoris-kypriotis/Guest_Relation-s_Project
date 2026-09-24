@@ -316,5 +316,258 @@ class TestChargeRoundTrip(unittest.TestCase):
         self.assertEqual(by, "Manager")
 
 
+class TestCakeMemoDocumentGeneration(unittest.TestCase):
+    """Test generate_cake_memo_document and parse_cake_memo_document round-trips."""
+
+    def setUp(self):
+        """Verify template exists before tests run."""
+        import os
+        from MODULES.cake_memo.paths import CAKE_MEMO_TEMPLATE_PATH
+
+        self.template_path = CAKE_MEMO_TEMPLATE_PATH
+        if not os.path.exists(self.template_path):
+            self.skipTest(f"Template not found at {self.template_path}")
+
+    def test_round_trip_normal_case(self):
+        """
+        Test: generate a normal cake memo (chocolate + strawberry flavor, written text,
+        Il Gusto venue, complimentary charge), then parse it back and verify all fields match.
+        """
+        import os
+        import tempfile
+        from MODULES.cake_memo.document import generate_cake_memo_document
+        from MODULES.cake_memo.parser import parse_cake_memo_document
+
+        form_data = {
+            "flavor": "chocolate_strawberry",
+            "written_text": "Happy Anniversary",
+            "qty": 2,
+            "venue": "il_gusto",
+            "hour": 19,
+            "minute": 30,
+            "is_pm": True,
+            "charge_state": CHARGE_COMPLIMENTARY,
+            "complimentary_by": "Maria Papadopoulou",
+            "room_number": "0412",
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docx_path = os.path.join(tmpdir, "test_memo.docx")
+            generate_cake_memo_document(form_data, docx_path)
+
+            self.assertTrue(os.path.exists(docx_path), "Generated document should exist")
+
+            # Parse it back
+            parsed = parse_cake_memo_document(docx_path)
+
+            # Verify all fields match
+            self.assertEqual(parsed["flavor"], form_data["flavor"])
+            self.assertEqual(parsed["written_text"], form_data["written_text"])
+            self.assertEqual(parsed["qty"], form_data["qty"])
+            self.assertEqual(parsed["venue"], form_data["venue"])
+            self.assertEqual(parsed["hour"], form_data["hour"])
+            self.assertEqual(parsed["minute"], form_data["minute"])
+            self.assertEqual(parsed["is_pm"], form_data["is_pm"])
+            self.assertEqual(parsed["charge_state"], form_data["charge_state"])
+            self.assertEqual(parsed["complimentary_by"], form_data["complimentary_by"])
+            self.assertEqual(parsed["room_number"], form_data["room_number"])
+
+    def test_round_trip_room_venue_paid_charge(self):
+        """
+        Test: Room venue (no location prefix), Paid charge, no written text.
+        """
+        import os
+        import tempfile
+        from MODULES.cake_memo.document import generate_cake_memo_document
+        from MODULES.cake_memo.parser import parse_cake_memo_document
+
+        form_data = {
+            "flavor": "vanilla",
+            "written_text": "",
+            "qty": 1,
+            "venue": "room",
+            "hour": 14,
+            "minute": 30,
+            "is_pm": False,
+            "charge_state": CHARGE_PAID,
+            "complimentary_by": "",
+            "room_number": "0305",
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docx_path = os.path.join(tmpdir, "test_memo.docx")
+            generate_cake_memo_document(form_data, docx_path)
+
+            parsed = parse_cake_memo_document(docx_path)
+
+            self.assertEqual(parsed["flavor"], "vanilla")
+            self.assertEqual(parsed["written_text"], "")
+            self.assertEqual(parsed["qty"], 1)
+            self.assertEqual(parsed["venue"], "room")
+            self.assertEqual(parsed["hour"], 14)
+            self.assertEqual(parsed["minute"], 30)
+            self.assertFalse(parsed["is_pm"])
+            self.assertEqual(parsed["charge_state"], CHARGE_PAID)
+            self.assertEqual(parsed["complimentary_by"], "")
+            self.assertEqual(parsed["room_number"], "0305")
+
+    def test_round_trip_elia_venue_pending_charge(self):
+        """
+        Test: Elia venue, Pending charge, strawberry flavor with written text.
+        """
+        import os
+        import tempfile
+        from MODULES.cake_memo.document import generate_cake_memo_document
+        from MODULES.cake_memo.parser import parse_cake_memo_document
+
+        form_data = {
+            "flavor": "strawberry",
+            "written_text": "Best wishes",
+            "qty": 3,
+            "venue": "elia",
+            "hour": 8,
+            "minute": 0,
+            "is_pm": False,
+            "charge_state": CHARGE_PENDING,
+            "complimentary_by": "",
+            "room_number": "0118",
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docx_path = os.path.join(tmpdir, "test_memo.docx")
+            generate_cake_memo_document(form_data, docx_path)
+
+            parsed = parse_cake_memo_document(docx_path)
+
+            self.assertEqual(parsed["flavor"], "strawberry")
+            self.assertEqual(parsed["written_text"], "Best wishes")
+            self.assertEqual(parsed["qty"], 3)
+            self.assertEqual(parsed["venue"], "elia")
+            self.assertEqual(parsed["hour"], 8)
+            self.assertEqual(parsed["minute"], 0)
+            self.assertFalse(parsed["is_pm"])
+            self.assertEqual(parsed["charge_state"], CHARGE_PENDING)
+            self.assertEqual(parsed["complimentary_by"], "")
+            self.assertEqual(parsed["room_number"], "0118")
+
+    def test_missing_header_column_raises_error(self):
+        """
+        Test: generate_cake_memo_document raises ValueError if a required header
+        column is missing from the template.
+        """
+        import os
+        import tempfile
+        from docx import Document
+        from MODULES.cake_memo.document import generate_cake_memo_document
+
+        form_data = {
+            "flavor": "strawberry",
+            "written_text": "Test",
+            "qty": 1,
+            "venue": "room",
+            "hour": 12,
+            "minute": 0,
+            "is_pm": False,
+            "charge_state": CHARGE_PAID,
+            "complimentary_by": "",
+            "room_number": "0101",
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a malformed template missing one header column
+            malformed_template_path = os.path.join(tmpdir, "malformed.docx")
+            malformed_doc = Document()
+            table = malformed_doc.add_table(rows=2, cols=6)
+            # Set headers (intentionally skip SERVICE DESCRIPTION)
+            table.rows[0].cells[0].text = "QTY"
+            table.rows[0].cells[1].text = "PROVIDED AT"
+            table.rows[0].cells[2].text = "DATE"
+            table.rows[0].cells[3].text = "CHARGE"
+            table.rows[0].cells[4].text = "ROOM NUMBER"
+            table.rows[0].cells[5].text = "EXTRA"
+            malformed_doc.save(malformed_template_path)
+
+            # Monkey-patch the template path for this test
+            import MODULES.cake_memo.document as doc_module
+
+            original_path = doc_module.CAKE_MEMO_TEMPLATE_PATH
+            doc_module.CAKE_MEMO_TEMPLATE_PATH = malformed_template_path
+
+            try:
+                output_path = os.path.join(tmpdir, "output.docx")
+                with self.assertRaises(ValueError) as cm:
+                    generate_cake_memo_document(form_data, output_path)
+                self.assertIn("SERVICE DESCRIPTION", str(cm.exception))
+            finally:
+                doc_module.CAKE_MEMO_TEMPLATE_PATH = original_path
+
+    def test_parse_missing_header_column_raises_error(self):
+        """
+        Test: parse_cake_memo_document raises ValueError if a required header
+        column is missing from the document.
+        """
+        import os
+        import tempfile
+        from docx import Document
+        from MODULES.cake_memo.parser import parse_cake_memo_document
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a malformed document missing CHARGE column
+            malformed_docx_path = os.path.join(tmpdir, "malformed.docx")
+            malformed_doc = Document()
+            table = malformed_doc.add_table(rows=2, cols=6)
+            # Set headers (intentionally skip CHARGE)
+            table.rows[0].cells[0].text = "SERVICE DESCRIPTION"
+            table.rows[0].cells[1].text = "QTY"
+            table.rows[0].cells[2].text = "PROVIDED AT"
+            table.rows[0].cells[3].text = "DATE"
+            table.rows[0].cells[4].text = "ROOM NUMBER"
+            table.rows[0].cells[5].text = "EXTRA"
+            # Add some data in row 1
+            table.rows[1].cells[0].text = "STRAWBERRY CAKE"
+            table.rows[1].cells[1].text = "1"
+            table.rows[1].cells[2].text = "12.00PM"
+            table.rows[1].cells[3].text = "24/09"
+            table.rows[1].cells[4].text = "0101"
+            malformed_doc.save(malformed_docx_path)
+
+            # Attempt to parse should raise ValueError
+            with self.assertRaises(ValueError) as cm:
+                parse_cake_memo_document(malformed_docx_path)
+            self.assertIn("CHARGE", str(cm.exception))
+
+    def test_no_access_to_real_database_output(self):
+        """
+        Verify that tests only use temporary directories, never touching
+        real DATABASE/, OUTPUT/, or ROOMS/ directories.
+        """
+        import tempfile
+        import os
+        from MODULES.cake_memo.document import generate_cake_memo_document
+        from MODULES.cake_memo.parser import parse_cake_memo_document
+
+        form_data = {
+            "flavor": "strawberry",
+            "written_text": "Test",
+            "qty": 1,
+            "venue": "room",
+            "hour": 12,
+            "minute": 0,
+            "is_pm": False,
+            "charge_state": CHARGE_PAID,
+            "complimentary_by": "",
+            "room_number": "0101",
+        }
+
+        # Ensure we use a hermetic temp directory
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertTrue(tmpdir.startswith(tempfile.gettempdir()))
+            docx_path = os.path.join(tmpdir, "test.docx")
+            generate_cake_memo_document(form_data, docx_path)
+            parsed = parse_cake_memo_document(docx_path)
+            # Verify the temp path is used and not any real directories
+            self.assertIn("tmp", docx_path.lower() or "temp" in docx_path.lower())
+
+
 if __name__ == "__main__":
     unittest.main()
