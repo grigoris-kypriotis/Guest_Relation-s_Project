@@ -828,5 +828,296 @@ class TestCakeMemoForm(unittest.TestCase):
         self.assertEqual(form.pax_spinbox.value(), 5)
 
 
+class TestCakeMemoOptionWidget(unittest.TestCase):
+    """Test the CakeMemoOptionWidget for mode tracking and lifecycle."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up QApplication for widget testing."""
+        from PyQt6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication(["", "-platform", "offscreen"])
+
+    def test_construction_no_crash(self):
+        """Test: CakeMemoOptionWidget() constructs without crash."""
+        from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+        widget = CakeMemoOptionWidget()
+        self.assertIsNotNone(widget)
+        self.assertIsNone(widget.mode)
+        self.assertIsNone(widget.loaded_file_path)
+
+    def test_build_submenu_no_crash(self):
+        """Test: build_submenu() returns a valid widget with 6 buttons, no crash."""
+        from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+        widget = CakeMemoOptionWidget()
+        submenu = widget.build_submenu()
+
+        self.assertIsNotNone(submenu)
+        self.assertIsNotNone(widget.btn_create)
+        self.assertIsNotNone(widget.btn_update)
+        self.assertIsNotNone(widget.btn_edit)
+        self.assertIsNotNone(widget.btn_save)
+        self.assertIsNotNone(widget.btn_close)
+        self.assertIsNotNone(widget.btn_send_email)
+
+        # Verify button labels
+        self.assertEqual(widget.btn_create.text(), "Create Cake Memo")
+        self.assertEqual(widget.btn_update.text(), "Update Cake Memo")
+        self.assertEqual(widget.btn_edit.text(), "Edit")
+        self.assertEqual(widget.btn_save.text(), "Save")
+        self.assertEqual(widget.btn_close.text(), "Close")
+        self.assertEqual(widget.btn_send_email.text(), "Send Email")
+
+    def test_handle_create_cake_memo_mode_transition(self):
+        """Test: handle_create_cake_memo() sets mode='create' and hides office_viewer."""
+        from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+        widget = CakeMemoOptionWidget()
+
+        widget.handle_create_cake_memo()
+
+        self.assertEqual(widget.mode, "create")
+        self.assertIsNone(widget.loaded_file_path)
+        # Verify office_viewer is hidden (form visibility may not work with offscreen platform)
+        self.assertFalse(widget.office_viewer.isVisible())
+
+    def test_handle_close_in_create_mode_discards_form(self):
+        """Test: handle_close() in create mode discards form and returns to None mode."""
+        from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+        widget = CakeMemoOptionWidget()
+
+        widget.handle_create_cake_memo()
+        self.assertEqual(widget.mode, "create")
+
+        widget.handle_close()
+        self.assertIsNone(widget.mode)
+        self.assertFalse(widget.form.isVisible())
+
+    def test_handle_save_create_mode_requires_room_number(self):
+        """Test: handle_save() in create mode logs ERROR and aborts if room_number is blank."""
+        from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+
+        log_messages = []
+        def capture_log(category, message, level):
+            log_messages.append((category, message, level))
+
+        widget = CakeMemoOptionWidget(log_callback=capture_log)
+        widget.handle_create_cake_memo()
+
+        # Leave room number blank
+        widget.form.room_number_edit.setText("")
+
+        # Attempt to save
+        widget.handle_save()
+
+        # Should log an error
+        error_logs = [msg for msg in log_messages if msg[2] == "ERROR"]
+        self.assertTrue(any("Room number" in msg[1] for msg in error_logs))
+        # Mode should still be "create" (not saved)
+        self.assertEqual(widget.mode, "create")
+
+    def test_handle_save_create_mode_generates_file_with_correct_name_format(self):
+        """
+        Test: handle_save() in create mode generates a file with the exact expected
+        filename pattern 'CAKE MEMO (DD-MM-YY) ROOM ####.docx'.
+        """
+        import os
+        import tempfile
+        from PyQt6.QtCore import QTime
+        from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_messages = []
+            def capture_log(category, message, level):
+                log_messages.append((category, message, level))
+
+            widget = CakeMemoOptionWidget(log_callback=capture_log)
+
+            # Mock _get_cake_memos_dir to return our temp dir
+            widget._get_cake_memos_dir = lambda: tmpdir
+
+            widget.handle_create_cake_memo()
+
+            # Fill in form data
+            widget.form.room_number_edit.setText("0412")
+            widget.form.flavor_combo.setCurrentIndex(0)  # strawberry
+            widget.form.written_text_edit.setText("Happy Birthday")
+            widget.form.pax_spinbox.setValue(3)
+            widget.form.qty_spinbox.setValue(2)
+            widget.form.venue_buttons["il_gusto"].setChecked(True)
+            widget.form.delivery_time_edit.setTime(QTime(19, 30))
+            widget.form.delivery_add_button.click()
+            widget.form.charge_buttons[CHARGE_PAID].setChecked(True)
+
+            # Save
+            widget.handle_save()
+
+            # Verify a file was created with the correct name pattern
+            files = os.listdir(tmpdir)
+            self.assertEqual(len(files), 1, f"Expected exactly 1 file, got {len(files)}: {files}")
+
+            filename = files[0]
+            # Check the pattern: "CAKE MEMO (DD-MM-YY) ROOM 0412.docx"
+            import re
+            pattern = r"^CAKE MEMO \(\d{2}-\d{2}-\d{2}\) ROOM 0412\.docx$"
+            self.assertIsNotNone(re.match(pattern, filename), f"Filename '{filename}' does not match pattern")
+
+            # Mode should be reset
+            self.assertIsNone(widget.mode)
+
+    def test_handle_save_create_mode_with_collision_applies_updated_suffix(self):
+        """
+        Test: handle_save() in create mode with a pre-existing file at the target name
+        applies the ' UPDATED' / ' UPDATED (N)' suffix pattern.
+        """
+        import os
+        import tempfile
+        from PyQt6.QtCore import QTime
+        from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+        from MODULES.cake_memo.document import generate_cake_memo_document
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Pre-create a file with the target name
+            room_num = "0412"
+            from datetime import datetime
+            target_filename = f"CAKE MEMO ({datetime.now():%d-%m-%y}) ROOM {room_num}.docx"
+            target_path = os.path.join(tmpdir, target_filename)
+
+            # Create a dummy file at that path
+            dummy_data = {
+                "flavor": "strawberry",
+                "written_text": "",
+                "qty": 1,
+                "venue": "room",
+                "hour": 12,
+                "minute": 0,
+                "is_pm": False,
+                "charge_state": CHARGE_PAID,
+                "complimentary_by": "",
+                "room_number": "0000",
+            }
+            generate_cake_memo_document(dummy_data, target_path)
+            self.assertTrue(os.path.exists(target_path))
+
+            # Now create widget and try to save with the same room number
+            widget = CakeMemoOptionWidget()
+            widget._get_cake_memos_dir = lambda: tmpdir
+            widget.handle_create_cake_memo()
+
+            widget.form.room_number_edit.setText(room_num)
+            widget.form.flavor_combo.setCurrentIndex(0)
+            widget.form.venue_buttons["il_gusto"].setChecked(True)
+            widget.form.delivery_time_edit.setTime(QTime(19, 30))
+            widget.form.delivery_add_button.click()
+
+            # Save
+            widget.handle_save()
+
+            # Verify both files exist: original + " UPDATED" variant
+            files = sorted(os.listdir(tmpdir))
+            self.assertEqual(len(files), 2, f"Expected 2 files (original + UPDATED), got {len(files)}: {files}")
+
+            # Check that one has " UPDATED" suffix
+            updated_files = [f for f in files if " UPDATED" in f]
+            self.assertEqual(len(updated_files), 1)
+
+    def test_handle_save_update_mode_overwrites_loaded_file(self):
+        """
+        Test: handle_save() in update mode overwrites self.loaded_file_path
+        (same file path in, same path out) rather than creating a new file.
+        """
+        import os
+        import tempfile
+        from PyQt6.QtCore import QTime
+        from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+        from MODULES.cake_memo.document import generate_cake_memo_document
+        from MODULES.cake_memo.parser import parse_cake_memo_document
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create an initial file
+            initial_data = {
+                "flavor": "strawberry",
+                "written_text": "Original",
+                "qty": 1,
+                "venue": "room",
+                "hour": 12,
+                "minute": 0,
+                "is_pm": False,
+                "charge_state": CHARGE_PAID,
+                "complimentary_by": "",
+                "room_number": "0101",
+            }
+            initial_path = os.path.join(tmpdir, "test_memo.docx")
+            generate_cake_memo_document(initial_data, initial_path)
+
+            # Load it in update mode and modify
+            widget = CakeMemoOptionWidget()
+            widget.mode = "update"
+            widget.loaded_file_path = initial_path
+
+            parsed_data = parse_cake_memo_document(initial_path)
+            parsed_data["pax"] = 1  # Add pax since parser omits it
+            widget.form.set_form_data(parsed_data)
+
+            # Modify the form
+            widget.form.room_number_edit.setText("0102")
+            widget.form.written_text_edit.setText("Modified")
+            widget.form.venue_buttons["il_gusto"].setChecked(True)
+            widget.form.delivery_time_edit.setTime(QTime(19, 30))
+            widget.form.delivery_add_button.click()
+
+            # Save
+            widget.handle_save()
+
+            # Verify only 1 file exists (same path, overwritten)
+            files = os.listdir(tmpdir)
+            self.assertEqual(len(files), 1)
+            self.assertEqual(files[0], "test_memo.docx")
+
+            # Verify the file was updated
+            updated_data = parse_cake_memo_document(initial_path)
+            self.assertEqual(updated_data["room_number"], "0102")
+            self.assertEqual(updated_data["written_text"], "Modified")
+            self.assertEqual(updated_data["venue"], "il_gusto")
+
+    def test_handle_close_create_mode_no_file_written(self):
+        """Test: handle_close() in create mode does NOT write any file to disk."""
+        import os
+        import tempfile
+        from PyQt6.QtCore import QTime
+        from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            widget = CakeMemoOptionWidget()
+            widget._get_cake_memos_dir = lambda: tmpdir
+            widget.handle_create_cake_memo()
+
+            # Fill in form data
+            widget.form.room_number_edit.setText("0412")
+            widget.form.venue_buttons["il_gusto"].setChecked(True)
+            widget.form.delivery_time_edit.setTime(QTime(19, 30))
+            widget.form.delivery_add_button.click()
+
+            # Close without saving
+            widget.handle_close()
+
+            # Verify NO files were created
+            files = os.listdir(tmpdir)
+            self.assertEqual(len(files), 0, f"Expected no files, but found {files}")
+
+    def test_handle_send_email_stub_is_warning(self):
+        """Test: handle_send_email() is a stub that just logs a WARNING."""
+        from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
+
+        log_messages = []
+        def capture_log(category, message, level):
+            log_messages.append((category, message, level))
+
+        widget = CakeMemoOptionWidget(log_callback=capture_log)
+        widget.handle_send_email()
+
+        # Should have logged a warning
+        warning_logs = [msg for msg in log_messages if msg[2] == "WARNING"]
+        self.assertTrue(any("not yet implemented" in msg[1].lower() for msg in warning_logs))
+
+
 if __name__ == "__main__":
     unittest.main()
