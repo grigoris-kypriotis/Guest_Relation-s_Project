@@ -28,6 +28,7 @@ from MODULES.offers_module import (
     resolve_todays_offer_file,
 )
 from MODULES.offers.keyword_rules import classify_order as classify_order_direct
+from MODULES.offers import pipeline
 from MODULES.common import paths_config
 from OPTIONS.offers_option import OffersOptionWidget
 from OPTIONS.configuration_option import load_app_settings
@@ -2114,6 +2115,213 @@ class TestConfigurableArrivalsDir(unittest.TestCase):
         finally:
             om.ARRIVALS_FOLDER = orig_arrivals
             om.FINAL_FOLDER = orig_final
+
+
+class TestNoArrivalsPanelUI(unittest.TestCase):
+    """
+    Tests for the new No Arrivals Panel UI and associated handlers in OffersOptionWidget.
+    Verifies signal emission, panel visibility, and user interactions.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up QApplication for widget testing."""
+        cls.app = QApplication.instance() or QApplication(["", "-platform", "offscreen"])
+
+    def setUp(self):
+        """Set up hermetic test environment."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.offer_lists_dir = os.path.join(self.temp_dir, "offer_lists")
+        self.temp_arrivals = os.path.join(self.temp_dir, "arrivals")
+        self.temp_output = os.path.join(self.temp_dir, "output")
+        os.makedirs(self.offer_lists_dir, exist_ok=True)
+        os.makedirs(self.temp_arrivals, exist_ok=True)
+        os.makedirs(self.temp_output, exist_ok=True)
+
+        # Monkeypatch settings and module paths
+        self.patcher_settings = patch('OPTIONS.offers_option.load_app_settings')
+        self.mock_load_settings = self.patcher_settings.start()
+        self.mock_load_settings.return_value = {
+            "storage": {
+                "offer_lists_dir": self.offer_lists_dir,
+                "arrivals_dir": self.temp_arrivals
+            }
+        }
+
+        self.patcher_arrivals = patch('OPTIONS.offers_option.ARRIVALS_FOLDER', self.temp_arrivals)
+        self.patcher_arrivals.start()
+
+        self.patcher_om_arrivals = patch.object(om, 'ARRIVALS_FOLDER', self.temp_arrivals)
+        self.patcher_om_arrivals.start()
+
+        self.patcher_om_final = patch.object(om, 'FINAL_FOLDER', self.temp_output)
+        self.patcher_om_final.start()
+
+        # Create the widget
+        self.log_messages = []
+        self.widget = OffersOptionWidget(log_callback=self._log_callback)
+        self.submenu = self.widget.build_submenu()
+
+    def tearDown(self):
+        """Clean up."""
+        if self.submenu:
+            self.submenu.deleteLater()
+        if self.widget:
+            self.widget.deleteLater()
+        self.patcher_settings.stop()
+        self.patcher_arrivals.stop()
+        self.patcher_om_arrivals.stop()
+        self.patcher_om_final.stop()
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _log_callback(self, category, message, level):
+        """Mock log callback to capture log messages."""
+        self.log_messages.append((category, message, level))
+
+    def test_show_hide_no_arrivals_panel(self):
+        """
+        Test 1: _show_no_arrivals_panel() hides office_viewer and shows no_arrivals_panel.
+        _hide_no_arrivals_panel() reverses this.
+        """
+        # Initially, panel should be hidden
+        self.assertFalse(self.widget.no_arrivals_panel.isVisible(), "panel should be initially hidden")
+
+        # Call _show_no_arrivals_panel
+        self.widget._show_no_arrivals_panel()
+        # Check that hide() was called on office_viewer and show() on panel
+        self.assertFalse(self.widget.no_arrivals_panel.isHidden(), "panel should not be hidden after show_panel")
+        self.assertTrue(self.widget.office_viewer.isHidden(), "office_viewer should be hidden after show_panel")
+
+        # Call _hide_no_arrivals_panel
+        self.widget._hide_no_arrivals_panel()
+        self.assertTrue(self.widget.no_arrivals_panel.isHidden(), "panel should be hidden after hide_panel")
+        self.assertFalse(self.widget.office_viewer.isHidden(), "office_viewer should not be hidden after hide_panel")
+
+    def test_handle_goto_config_emits_signal(self):
+        """
+        Test 2: Calling _handle_goto_config() emits navigate_to_config signal
+        and hides the panel.
+        """
+        self.widget._show_no_arrivals_panel()
+        self.assertFalse(self.widget.no_arrivals_panel.isHidden(), "panel should not be hidden before handler")
+
+        # Capture signal emission
+        signal_received = []
+
+        def on_signal():
+            signal_received.append(True)
+
+        self.widget.navigate_to_config.connect(on_signal)
+
+        # Call handler
+        self.widget._handle_goto_config()
+
+        # Verify signal was emitted
+        self.assertEqual(len(signal_received), 1, "navigate_to_config signal should be emitted once")
+
+        # Verify panel was hidden
+        self.assertTrue(self.widget.no_arrivals_panel.isHidden(), "panel should be hidden after handler")
+
+    def test_run_offers_creation_shows_panel_on_missing_csvs(self):
+        """
+        Test 3: run_offers_creation() on MISSING_CSVS pipeline result shows the panel
+        and does NOT call QFileDialog.getOpenFileName immediately.
+        """
+        # Mock execute_offers_pipeline to return MISSING_CSVS on first call
+        with patch('OPTIONS.offers_option.execute_offers_pipeline') as mock_pipeline:
+            mock_pipeline.return_value = (False, "MISSING_CSVS", None)
+
+            self.assertTrue(self.widget.no_arrivals_panel.isHidden(), "panel should be hidden initially")
+
+            # Run creation
+            self.widget.run_offers_creation()
+
+            # Verify pipeline was called once (not prompted for manual file selection)
+            self.assertEqual(mock_pipeline.call_count, 1, "Pipeline should be called once (no dialog prompt)")
+
+            # Verify panel is now visible
+            self.assertFalse(self.widget.no_arrivals_panel.isHidden(), "panel should not be hidden after MISSING_CSVS")
+
+            # Verify office_viewer is hidden
+            self.assertTrue(self.widget.office_viewer.isHidden(), "office_viewer should be hidden")
+
+    def test_handle_browse_for_arrivals_with_file_selected(self):
+        """
+        Test 4: _handle_browse_for_arrivals() with mocked QFileDialog and hermetic
+        execute_offers_pipeline calls pipeline with selected_csvs.
+        """
+        # Create a synthetic CSV
+        csv_path = os.path.join(self.temp_arrivals, "test_arrivals.csv")
+        create_synthetic_beach_csv(csv_path)
+
+        with patch('OPTIONS.offers_option.QFileDialog.getOpenFileName') as mock_dialog:
+            mock_dialog.return_value = (csv_path, "")
+
+            # Mock execute_offers_pipeline to verify it's called correctly
+            with patch('OPTIONS.offers_option.execute_offers_pipeline') as mock_pipeline:
+                # Create a docx path to return
+                docx_path = os.path.join(self.temp_output, "OFFER LIST (2026-09-24).docx")
+
+                # Make the pipeline return success with the path
+                mock_pipeline.return_value = (True, "Success: Pipeline complete.", docx_path)
+
+                # Call handler
+                self.widget._handle_browse_for_arrivals()
+
+                # Verify QFileDialog was called
+                mock_dialog.assert_called_once()
+
+                # Verify execute_offers_pipeline was called with selected_csvs
+                mock_pipeline.assert_called_once()
+                call_kwargs = mock_pipeline.call_args[1]
+                self.assertEqual(call_kwargs['selected_csvs'], [csv_path], "Pipeline should be called with selected CSV")
+
+    def test_handle_browse_for_arrivals_no_file_selected(self):
+        """
+        Test 4b: _handle_browse_for_arrivals() with no file selected aborts gracefully.
+        """
+        with patch('OPTIONS.offers_option.QFileDialog.getOpenFileName') as mock_dialog:
+            mock_dialog.return_value = ("", "")
+
+            # Call handler
+            self.widget._handle_browse_for_arrivals()
+
+            # Verify abort message was logged
+            self.assertTrue(
+                any("Operation aborted" in msg for _, msg, _ in self.log_messages),
+                "Should log abort message when no file selected"
+            )
+
+    def test_stale_csv_via_browse_rejected_by_date_check(self):
+        """
+        Test 5: A stale (non-today creation date) CSV selected via _handle_browse_for_arrivals()
+        is still rejected by the existing date-stamp check in execute_offers_pipeline.
+        This proves the date check applies to the browse path and there's no bypass.
+        """
+        # Create a synthetic CSV with a stale creation date
+        csv_path = os.path.join(self.temp_arrivals, "stale_arrivals.csv")
+        create_synthetic_beach_csv(csv_path)
+
+        # Mock the file creation date to be yesterday
+        yesterday = datetime.now().date() - timedelta(days=1)
+
+        with patch('OPTIONS.offers_option.QFileDialog.getOpenFileName') as mock_dialog:
+            mock_dialog.return_value = (csv_path, "")
+
+            with patch.object(pipeline, '_get_file_creation_date', return_value=yesterday):
+                # Call handler (NOT mocking execute_offers_pipeline; use real one)
+                self.widget._handle_browse_for_arrivals()
+
+                # Verify an error was logged about the stale date
+                error_messages = [msg for _, msg, level in self.log_messages if level == "ERROR"]
+                self.assertTrue(
+                    any("not today" in msg.lower() or "today" in msg.lower() for msg in error_messages),
+                    f"Should log date mismatch error. Got: {error_messages}"
+                )
+
+                # The pipeline will return False with a date error message
+                error_found = any("today" in msg.lower() for msg in error_messages)
+                self.assertTrue(error_found, "Should log error about file not being today's")
 
 
 if __name__ == "__main__":

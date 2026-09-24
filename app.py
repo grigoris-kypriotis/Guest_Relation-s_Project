@@ -258,6 +258,7 @@ class GuestRelationApp(QMainWindow):
         self.config_widget.data_updated.connect(self.booking_widget.refresh_calls)
         self.config_widget.data_updated.connect(self.plot_widget.refresh_plot)
         self.booking_widget.feedback_submitted.connect(self.handle_booking_feedback_to_todo)
+        self.offers_widget.navigate_to_config.connect(lambda: self.select_category("CONFIG"))
 
         main_layout.addWidget(self.sidebar)
         main_layout.addWidget(self.stacked_content)

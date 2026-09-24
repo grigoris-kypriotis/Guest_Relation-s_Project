@@ -9,8 +9,9 @@ import os
 from typing import Optional, Callable
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QFrame, QFileDialog, QMessageBox, QPushButton
+    QWidget, QVBoxLayout, QLabel, QFrame, QFileDialog, QMessageBox, QPushButton, QHBoxLayout
 )
+from PyQt6.QtCore import pyqtSignal
 
 from MODULES.offers_module import (
     execute_offers_pipeline,
@@ -27,6 +28,8 @@ class OffersOptionWidget(QWidget):
     Offers view: document viewer container with create/update pipeline,
     save/close lifecycle, and status label.
     """
+
+    navigate_to_config = pyqtSignal()
 
     def __init__(self, log_callback: Optional[Callable] = None, todo_widget=None, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -61,6 +64,72 @@ class OffersOptionWidget(QWidget):
         self.office_viewer = OfficeViewer()
         oc_layout.addWidget(self.office_viewer, stretch=1)
 
+        # No Arrivals Panel
+        self.no_arrivals_panel = QFrame()
+        self.no_arrivals_panel.setObjectName("NoArrivalsPanel")
+        self.no_arrivals_panel.setStyleSheet("""
+            #NoArrivalsPanel {
+                background-color: #FFF5F7;
+                border: 2px solid #f43f5e;
+                border-radius: 6px;
+                padding: 12px;
+            }
+        """)
+        panel_layout = QVBoxLayout(self.no_arrivals_panel)
+        panel_layout.setContentsMargins(12, 12, 12, 12)
+        panel_layout.setSpacing(12)
+
+        panel_label = QLabel("No arrivals list was found for today.\n\nConfigure the Arrivals Folder in Settings, or locate the file manually.")
+        panel_label.setWordWrap(True)
+        panel_label.setStyleSheet("color: #333333; font-size: 12px;")
+        panel_layout.addWidget(panel_label)
+
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(8)
+
+        self.btn_goto_config = QPushButton("Go to Configuration")
+        self.btn_goto_config.setStyleSheet("""
+            QPushButton {
+                background-color: #f43f5e;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #e63946;
+            }
+        """)
+        button_layout.addWidget(self.btn_goto_config)
+
+        self.btn_browse_arrivals = QPushButton("Browse for File…")
+        self.btn_browse_arrivals.setStyleSheet("""
+            QPushButton {
+                background-color: #FFB6C1;
+                color: #333333;
+                border: 1px solid #f43f5e;
+                border-radius: 4px;
+                padding: 8px 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #FFA0AD;
+            }
+        """)
+        button_layout.addWidget(self.btn_browse_arrivals)
+
+        button_layout.addStretch()
+        panel_layout.addLayout(button_layout)
+        panel_layout.addStretch()
+
+        oc_layout.addWidget(self.no_arrivals_panel, stretch=1)
+        self.no_arrivals_panel.hide()
+
+        # Wire button handlers
+        self.btn_goto_config.clicked.connect(self._handle_goto_config)
+        self.btn_browse_arrivals.clicked.connect(self._handle_browse_for_arrivals)
+
         offers_layout.addWidget(offers_container)
 
     def _log(self, message: str, level: str = "INFO") -> None:
@@ -76,6 +145,16 @@ class OffersOptionWidget(QWidget):
         exists = resolve_todays_offer_file(offer_lists_dir=offer_lists_dir) is not None
         self.btn_create.setEnabled(not exists)
         self.btn_send_email.setEnabled(exists)
+
+    def _show_no_arrivals_panel(self) -> None:
+        """Show the no-arrivals panel and hide the office viewer."""
+        self.office_viewer.hide()
+        self.no_arrivals_panel.show()
+
+    def _hide_no_arrivals_panel(self) -> None:
+        """Hide the no-arrivals panel and show the office viewer."""
+        self.no_arrivals_panel.hide()
+        self.office_viewer.show()
 
     # ----- Document lifecycle -----
 
@@ -144,10 +223,30 @@ class OffersOptionWidget(QWidget):
 
     # ----- Pipeline actions -----
 
+    def _finish_pipeline_result(self, pipeline_status: bool, msg: str, final_path) -> None:
+        """
+        Handle the result of a pipeline execution.
+        Logs the result, record failures, and opens the document if successful.
+        """
+        level = "SUCCESS" if pipeline_status else "ERROR"
+        self._log(msg, level)
+
+        # Log individual record write failures if any
+        record_failures = get_last_record_failures()
+        for booking_id, error in record_failures:
+            self._log(f"Record write failed for booking {booking_id}: {error}", "ERROR")
+
+        if pipeline_status and final_path:
+            self._log(f"Opening generated document in OfficeViewer: {os.path.basename(final_path)}")
+            self.office_viewer.open_file(final_path)
+            # Refresh button states to reflect that today's file now exists
+            self._refresh_button_states()
+
     def run_offers_creation(self) -> None:
         """Execute the Create Offerlist pipeline."""
         try:
             self.offers_status.hide()
+            self._hide_no_arrivals_panel()
             self.is_update_mode = False
             self._log("Action: Create Offerlist triggered")
 
@@ -165,31 +264,37 @@ class OffersOptionWidget(QWidget):
             pipeline_status, msg, final_path = execute_offers_pipeline(arrivals_dir=arrivals_dir)
 
             if not pipeline_status and msg == "MISSING_CSVS":
-                self._log("Missing CSV in ARRIVALS. Prompting file selector...", "WARNING")
-                dialog_start_dir = arrivals_dir or ARRIVALS_FOLDER
-                selected_file, _ = QFileDialog.getOpenFileName(self, "Select today's arrivals CSV", dialog_start_dir, "CSV (*.csv)")
-                if selected_file:
-                    self._log(f"User selected CSV file: {os.path.basename(selected_file)}")
-                    pipeline_status, msg, final_path = execute_offers_pipeline(selected_csvs=[selected_file], arrivals_dir=arrivals_dir)
-                else:
-                    self._log("Requirement: exactly 1 CSV file. Operation aborted.", "ERROR")
-                    return
+                self._log("No arrivals list found for today.", "WARNING")
+                self._show_no_arrivals_panel()
+                return
 
-            level = "SUCCESS" if pipeline_status else "ERROR"
-            self._log(msg, level)
-
-            # Log individual record write failures if any
-            record_failures = get_last_record_failures()
-            for booking_id, error in record_failures:
-                self._log(f"Record write failed for booking {booking_id}: {error}", "ERROR")
-
-            if pipeline_status and final_path:
-                self._log(f"Opening generated document in OfficeViewer: {os.path.basename(final_path)}")
-                self.office_viewer.open_file(final_path)
-                # Refresh button states to reflect that today's file now exists
-                self._refresh_button_states()
+            self._finish_pipeline_result(pipeline_status, msg, final_path)
         except Exception as e:
             self._log(f"Creation pipeline error: {e}", "ERROR")
+
+    def _handle_goto_config(self) -> None:
+        """Handle 'Go to Configuration' button click."""
+        self._hide_no_arrivals_panel()
+        self.navigate_to_config.emit()
+
+    def _handle_browse_for_arrivals(self) -> None:
+        """Handle 'Browse for File' button click."""
+        try:
+            self._hide_no_arrivals_panel()
+            arrivals_dir = load_app_settings().get("storage", {}).get("arrivals_dir")
+            browse_start = arrivals_dir or ARRIVALS_FOLDER
+            selected_file, _ = QFileDialog.getOpenFileName(self, "Select today's arrivals CSV", browse_start, "CSV (*.csv)")
+            if not selected_file:
+                self._log("Requirement: exactly 1 CSV file. Operation aborted.", "ERROR")
+                return
+            self._log(f"User selected CSV file: {os.path.basename(selected_file)}")
+            pipeline_status, msg, final_path = execute_offers_pipeline(selected_csvs=[selected_file], arrivals_dir=arrivals_dir)
+            if not pipeline_status and msg == "MISSING_CSVS":
+                self._show_no_arrivals_panel()
+                return
+            self._finish_pipeline_result(pipeline_status, msg, final_path)
+        except Exception as e:
+            self._log(f"Browse/creation error: {e}", "ERROR")
 
     def run_offers_update(self) -> None:
         """Execute the UPDATE Offerlist pipeline."""
