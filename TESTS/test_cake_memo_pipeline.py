@@ -569,5 +569,264 @@ class TestCakeMemoDocumentGeneration(unittest.TestCase):
             self.assertIn("tmp", docx_path.lower() or "temp" in docx_path.lower())
 
 
+class TestCakeMemoForm(unittest.TestCase):
+    """Test the CakeMemoForm widget for Create/Update modes."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up QApplication for widget testing."""
+        from PyQt6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication(["", "-platform", "offscreen"])
+
+    def test_venue_selection_shows_confirmation_subsection(self):
+        """Test: Selecting each of the 5 delivery venue radio buttons reveals the confirmation subsection."""
+        from OPTIONS.cake_memo.form import CakeMemoForm
+        from PyQt6.QtCore import QTime
+
+        form = CakeMemoForm()
+
+        venue_options = [
+            ("elia", "Elia"),
+            ("ermis", "Ermis"),
+            ("ammos", "Ammos"),
+            ("il_gusto", "Il Gusto"),
+            ("room", "Room"),
+        ]
+
+        for venue_key, expected_label in venue_options:
+            with self.subTest(venue=venue_key):
+                # Initially not visible
+                self.assertFalse(form.delivery_confirmation_frame.isVisible())
+
+                # Click the radio button
+                form.venue_buttons[venue_key].setChecked(True)
+
+                # Confirmation subsection should now be visible
+                self.assertTrue(form.delivery_confirmation_frame.isVisible())
+
+                # Label should show the correct venue name
+                expected_text = f"Provide at: {expected_label}"
+                self.assertEqual(form.delivery_label.text(), expected_text)
+
+                # Uncheck for next iteration
+                form.venue_group.setExclusive(False)
+                form.venue_buttons[venue_key].setChecked(False)
+                form.venue_group.setExclusive(True)
+
+    def test_delivery_add_button_locks_venue_and_time(self):
+        """
+        Test: Clicking "Add" after selecting Il Gusto + 7:30 PM correctly populates
+        get_form_data(), and verify round-trip through compose_provided_at.
+        """
+        from OPTIONS.cake_memo.form import CakeMemoForm
+        from PyQt6.QtCore import QTime
+
+        form = CakeMemoForm()
+
+        # Select Il Gusto
+        form.venue_buttons["il_gusto"].setChecked(True)
+
+        # Set time to 7:30 PM (19:30 in 24-hour format)
+        form.delivery_time_edit.setTime(QTime(19, 30))
+
+        # Click Add
+        form.delivery_add_button.click()
+
+        # Get form data
+        form_data = form.get_form_data()
+
+        # Verify the delivery fields
+        self.assertEqual(form_data["venue"], "il_gusto")
+        self.assertEqual(form_data["hour"], 19)
+        self.assertEqual(form_data["minute"], 30)
+        self.assertTrue(form_data["is_pm"])
+
+        # Verify round-trip through compose_provided_at
+        composed = compose_provided_at("il_gusto", 19, 30, True)
+        self.assertEqual(composed, "IL GUSTO 19.30PM")  # Confirmed real example
+
+    def test_complimentary_field_visibility(self):
+        """Test: Selecting Complimentary shows the 'Complimentary by' field; Paid/Pending hide it."""
+        from OPTIONS.cake_memo.form import CakeMemoForm
+
+        form = CakeMemoForm()
+
+        # Initially should be hidden (Paid is default)
+        self.assertFalse(form.complimentary_by_frame.isVisible())
+
+        # Select Complimentary
+        form.charge_buttons[CHARGE_COMPLIMENTARY].setChecked(True)
+        self.assertTrue(form.complimentary_by_frame.isVisible())
+
+        # Select Paid
+        form.charge_buttons[CHARGE_PAID].setChecked(True)
+        self.assertFalse(form.complimentary_by_frame.isVisible())
+
+        # Select Pending
+        form.charge_buttons[CHARGE_PENDING].setChecked(True)
+        self.assertFalse(form.complimentary_by_frame.isVisible())
+
+        # Select Complimentary again
+        form.charge_buttons[CHARGE_COMPLIMENTARY].setChecked(True)
+        self.assertTrue(form.complimentary_by_frame.isVisible())
+
+    def test_set_form_data_get_form_data_round_trip(self):
+        """
+        Test: set_form_data(get_form_data()) is idempotent for multiple form states.
+        Test 2 different scenarios with different flavors, venues, and charges.
+        """
+        from OPTIONS.cake_memo.form import CakeMemoForm
+        from PyQt6.QtCore import QTime
+
+        # Scenario 1: Vanilla, Elia, Paid
+        scenario1 = {
+            "flavor": "vanilla",
+            "written_text": "Happy Birthday",
+            "pax": 5,
+            "qty": 2,
+            "venue": "elia",
+            "hour": 8,
+            "minute": 0,
+            "is_pm": False,
+            "charge_state": CHARGE_PAID,
+            "complimentary_by": "",
+            "room_number": "0101",
+        }
+
+        form1 = CakeMemoForm()
+        form1.set_form_data(scenario1)
+
+        # Manually trigger the "Add" button to lock in the delivery
+        form1.venue_buttons["elia"].setChecked(True)
+        form1.delivery_time_edit.setTime(QTime(8, 0))
+        form1.delivery_add_button.click()
+
+        collected1 = form1.get_form_data()
+
+        # Verify all fields match
+        self.assertEqual(collected1["flavor"], scenario1["flavor"])
+        self.assertEqual(collected1["written_text"], scenario1["written_text"])
+        self.assertEqual(collected1["pax"], scenario1["pax"])
+        self.assertEqual(collected1["qty"], scenario1["qty"])
+        self.assertEqual(collected1["venue"], scenario1["venue"])
+        self.assertEqual(collected1["hour"], scenario1["hour"])
+        self.assertEqual(collected1["minute"], scenario1["minute"])
+        self.assertEqual(collected1["is_pm"], scenario1["is_pm"])
+        self.assertEqual(collected1["charge_state"], scenario1["charge_state"])
+        self.assertEqual(collected1["room_number"], scenario1["room_number"])
+
+        # Scenario 2: Chocolate & Strawberry, Il Gusto, Complimentary
+        scenario2 = {
+            "flavor": "chocolate_strawberry",
+            "written_text": "Congratulations!",
+            "pax": 3,
+            "qty": 1,
+            "venue": "il_gusto",
+            "hour": 19,
+            "minute": 30,
+            "is_pm": True,
+            "charge_state": CHARGE_COMPLIMENTARY,
+            "complimentary_by": "Manager",
+            "room_number": "0412",
+        }
+
+        form2 = CakeMemoForm()
+        form2.set_form_data(scenario2)
+
+        # Manually trigger the "Add" button
+        form2.venue_buttons["il_gusto"].setChecked(True)
+        form2.delivery_time_edit.setTime(QTime(19, 30))
+        form2.delivery_add_button.click()
+
+        collected2 = form2.get_form_data()
+
+        # Verify all fields match
+        self.assertEqual(collected2["flavor"], scenario2["flavor"])
+        self.assertEqual(collected2["written_text"], scenario2["written_text"])
+        self.assertEqual(collected2["pax"], scenario2["pax"])
+        self.assertEqual(collected2["qty"], scenario2["qty"])
+        self.assertEqual(collected2["venue"], scenario2["venue"])
+        self.assertEqual(collected2["hour"], scenario2["hour"])
+        self.assertEqual(collected2["minute"], scenario2["minute"])
+        self.assertEqual(collected2["is_pm"], scenario2["is_pm"])
+        self.assertEqual(collected2["charge_state"], scenario2["charge_state"])
+        self.assertEqual(collected2["complimentary_by"], scenario2["complimentary_by"])
+        self.assertEqual(collected2["room_number"], scenario2["room_number"])
+
+    def test_reset_returns_to_default_state(self):
+        """Test: reset() returns the form to documented default state after non-default values."""
+        from OPTIONS.cake_memo.form import CakeMemoForm
+        from PyQt6.QtCore import QTime
+
+        form = CakeMemoForm()
+
+        # Set non-default values
+        form.venue_buttons["il_gusto"].setChecked(True)
+        form.delivery_time_edit.setTime(QTime(19, 30))
+        form.delivery_add_button.click()
+        form.room_number_edit.setText("0412")
+
+        # Set flavor to second option (chocolate)
+        form.flavor_combo.setCurrentIndex(1)
+        form.written_text_edit.setText("Test Message")
+        form.pax_spinbox.setValue(5)
+        form.qty_spinbox.setValue(3)
+        form.charge_buttons[CHARGE_COMPLIMENTARY].setChecked(True)
+        form.complimentary_by_edit.setText("Manager Name")
+
+        # Now reset
+        form.reset()
+
+        # Verify defaults
+        # Venue: no button should be checked
+        any_checked = any(btn.isChecked() for btn in form.venue_buttons.values())
+        self.assertFalse(any_checked)
+        self.assertFalse(form.delivery_confirmation_frame.isVisible())
+
+        # Room number: empty
+        self.assertEqual(form.room_number_edit.text(), "")
+
+        # Flavor: first option (strawberry)
+        self.assertEqual(form.flavor_combo.currentData(), "strawberry")
+
+        # Written text: empty
+        self.assertEqual(form.written_text_edit.text(), "")
+
+        # Pax: 1
+        self.assertEqual(form.pax_spinbox.value(), 1)
+
+        # Qty: 1
+        self.assertEqual(form.qty_spinbox.value(), 1)
+
+        # Charge: Paid
+        self.assertTrue(form.charge_buttons[CHARGE_PAID].isChecked())
+        self.assertEqual(form.complimentary_by_edit.text(), "")
+        self.assertFalse(form.complimentary_by_frame.isVisible())
+
+    def test_pax_spinbox_read_only_but_programmable(self):
+        """
+        Test: Pax QSpinBox is read-only (isReadOnly() == True) but value can still
+        be changed programmatically via stepUp()/stepDown()/setValue().
+        """
+        from OPTIONS.cake_memo.form import CakeMemoForm
+
+        form = CakeMemoForm()
+
+        # Verify it is read-only
+        self.assertTrue(form.pax_spinbox.isReadOnly())
+
+        # Verify programmatic changes still work
+        form.pax_spinbox.setValue(5)
+        self.assertEqual(form.pax_spinbox.value(), 5)
+
+        # Verify stepUp works
+        form.pax_spinbox.stepUp()
+        self.assertEqual(form.pax_spinbox.value(), 6)
+
+        # Verify stepDown works
+        form.pax_spinbox.stepDown()
+        self.assertEqual(form.pax_spinbox.value(), 5)
+
+
 if __name__ == "__main__":
     unittest.main()
