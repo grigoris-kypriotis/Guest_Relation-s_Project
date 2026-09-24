@@ -193,7 +193,6 @@ class GuestRelationApp(QMainWindow):
         self.action_manifest = self.popout_menu.addAction("Guest Manifest")
         self.action_stats = self.popout_menu.addAction("Stats")
         self.action_plot = self.popout_menu.addAction("Plot")
-        self.action_moves = self.popout_menu.addAction("Room Moves")
         self.action_config = self.popout_menu.addAction("Configuration")
         self.action_system_data = self.popout_menu.addAction("System Data Records")
         self.action_logs = self.popout_menu.addAction("Logs")
@@ -201,7 +200,6 @@ class GuestRelationApp(QMainWindow):
         self.action_manifest.triggered.connect(lambda: self.select_category("MANIFEST"))
         self.action_stats.triggered.connect(lambda: self.select_category("STATS"))
         self.action_plot.triggered.connect(lambda: self.select_category("PLOT"))
-        self.action_moves.triggered.connect(lambda: self.select_category("MOVES"))
         self.action_config.triggered.connect(lambda: self.select_category("CONFIG"))
         self.action_system_data.triggered.connect(lambda: self.select_category("SYSTEM_DATA"))
         self.action_logs.triggered.connect(lambda: self.select_category("LOGS"))
@@ -338,7 +336,7 @@ class GuestRelationApp(QMainWindow):
             btn.style().unpolish(btn)
             btn.style().polish(btn)
 
-        is_popout_active = self.active_category in ["MANIFEST", "STATS", "PLOT", "MOVES", "CONFIG", "SYSTEM_DATA", "LOGS"]
+        is_popout_active = self.active_category in ["MANIFEST", "STATS", "PLOT", "CONFIG", "SYSTEM_DATA", "LOGS"]
         self.sidebar.btn_hamburger.setProperty("active", is_popout_active)
         self.sidebar.btn_hamburger.style().unpolish(self.sidebar.btn_hamburger)
         self.sidebar.btn_hamburger.style().polish(self.sidebar.btn_hamburger)
