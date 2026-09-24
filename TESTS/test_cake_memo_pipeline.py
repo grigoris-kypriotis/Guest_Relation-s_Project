@@ -569,7 +569,6 @@ class TestCakeMemoForm(unittest.TestCase):
     def test_venue_selection_shows_confirmation_subsection(self):
         """Test: Selecting each of the 5 delivery venue radio buttons reveals the confirmation subsection."""
         from OPTIONS.cake_memo.form import CakeMemoForm
-        from PyQt6.QtCore import QTime
 
         form = CakeMemoForm()
 
@@ -584,41 +583,41 @@ class TestCakeMemoForm(unittest.TestCase):
         for venue_key, expected_label in venue_options:
             with self.subTest(venue=venue_key):
                 # Initially not visible
-                self.assertTrue(form.delivery_confirmation_frame.isHidden())
+                self.assertTrue(form.delivery_section.delivery_confirmation_frame.isHidden())
 
                 # Click the radio button
-                form.venue_buttons[venue_key].setChecked(True)
+                form.delivery_section.venue_buttons[venue_key].setChecked(True)
 
                 # Confirmation subsection should now be visible
-                self.assertFalse(form.delivery_confirmation_frame.isHidden())
+                self.assertFalse(form.delivery_section.delivery_confirmation_frame.isHidden())
 
                 # Label should show the correct venue name
                 expected_text = f"Provide at: {expected_label}"
-                self.assertEqual(form.delivery_label.text(), expected_text)
+                self.assertEqual(form.delivery_section.delivery_label.text(), expected_text)
 
                 # Uncheck for next iteration
-                form.venue_group.setExclusive(False)
-                form.venue_buttons[venue_key].setChecked(False)
-                form.venue_group.setExclusive(True)
+                form.delivery_section.venue_group.setExclusive(False)
+                form.delivery_section.venue_buttons[venue_key].setChecked(False)
+                form.delivery_section.venue_group.setExclusive(True)
 
     def test_delivery_add_button_locks_venue_and_time(self):
         """
-        Test: Clicking "Add" after selecting Il Gusto + 7:30 PM correctly populates
+        Test: Clicking "Add" after selecting Il Gusto + 19:30 correctly populates
         get_form_data(), and verify round-trip through compose_provided_at.
         """
         from OPTIONS.cake_memo.form import CakeMemoForm
-        from PyQt6.QtCore import QTime
 
         form = CakeMemoForm()
 
         # Select Il Gusto
-        form.venue_buttons["il_gusto"].setChecked(True)
+        form.delivery_section.venue_buttons["il_gusto"].setChecked(True)
 
-        # Set time to 7:30 PM (19:30 in 24-hour format)
-        form.delivery_time_edit.setTime(QTime(19, 30))
+        # Set time to 19:30 (7:30 PM in 24-hour format)
+        form.delivery_section.delivery_hour_spin.setValue(19)
+        form.delivery_section.delivery_minute_spin.setValue(30)
 
         # Click Add
-        form.delivery_add_button.click()
+        form.delivery_section.delivery_add_button.click()
 
         # Get form data
         form_data = form.get_form_data()
@@ -639,23 +638,23 @@ class TestCakeMemoForm(unittest.TestCase):
         form = CakeMemoForm()
 
         # Initially should be hidden (Paid is default)
-        self.assertTrue(form.complimentary_by_frame.isHidden())
+        self.assertTrue(form.charge_section.complimentary_by_frame.isHidden())
 
         # Select Complimentary
-        form.charge_buttons[CHARGE_COMPLIMENTARY].setChecked(True)
-        self.assertFalse(form.complimentary_by_frame.isHidden())
+        form.charge_section.charge_buttons[CHARGE_COMPLIMENTARY].setChecked(True)
+        self.assertFalse(form.charge_section.complimentary_by_frame.isHidden())
 
         # Select Paid
-        form.charge_buttons[CHARGE_PAID].setChecked(True)
-        self.assertTrue(form.complimentary_by_frame.isHidden())
+        form.charge_section.charge_buttons[CHARGE_PAID].setChecked(True)
+        self.assertTrue(form.charge_section.complimentary_by_frame.isHidden())
 
         # Select Pending
-        form.charge_buttons[CHARGE_PENDING].setChecked(True)
-        self.assertTrue(form.complimentary_by_frame.isHidden())
+        form.charge_section.charge_buttons[CHARGE_PENDING].setChecked(True)
+        self.assertTrue(form.charge_section.complimentary_by_frame.isHidden())
 
         # Select Complimentary again
-        form.charge_buttons[CHARGE_COMPLIMENTARY].setChecked(True)
-        self.assertFalse(form.complimentary_by_frame.isHidden())
+        form.charge_section.charge_buttons[CHARGE_COMPLIMENTARY].setChecked(True)
+        self.assertFalse(form.charge_section.complimentary_by_frame.isHidden())
 
     def test_set_form_data_get_form_data_round_trip(self):
         """
@@ -663,7 +662,6 @@ class TestCakeMemoForm(unittest.TestCase):
         Test 2 different scenarios with different flavors, venues, and charges.
         """
         from OPTIONS.cake_memo.form import CakeMemoForm
-        from PyQt6.QtCore import QTime
 
         # Scenario 1: Vanilla, Elia, Paid
         scenario1 = {
@@ -683,9 +681,10 @@ class TestCakeMemoForm(unittest.TestCase):
         form1.set_form_data(scenario1)
 
         # Manually trigger the "Add" button to lock in the delivery
-        form1.venue_buttons["elia"].setChecked(True)
-        form1.delivery_time_edit.setTime(QTime(8, 0))
-        form1.delivery_add_button.click()
+        form1.delivery_section.venue_buttons["elia"].setChecked(True)
+        form1.delivery_section.delivery_hour_spin.setValue(8)
+        form1.delivery_section.delivery_minute_spin.setValue(0)
+        form1.delivery_section.delivery_add_button.click()
 
         collected1 = form1.get_form_data()
 
@@ -718,9 +717,10 @@ class TestCakeMemoForm(unittest.TestCase):
         form2.set_form_data(scenario2)
 
         # Manually trigger the "Add" button
-        form2.venue_buttons["il_gusto"].setChecked(True)
-        form2.delivery_time_edit.setTime(QTime(19, 30))
-        form2.delivery_add_button.click()
+        form2.delivery_section.venue_buttons["il_gusto"].setChecked(True)
+        form2.delivery_section.delivery_hour_spin.setValue(19)
+        form2.delivery_section.delivery_minute_spin.setValue(30)
+        form2.delivery_section.delivery_add_button.click()
 
         collected2 = form2.get_form_data()
 
@@ -739,32 +739,32 @@ class TestCakeMemoForm(unittest.TestCase):
     def test_reset_returns_to_default_state(self):
         """Test: reset() returns the form to documented default state after non-default values."""
         from OPTIONS.cake_memo.form import CakeMemoForm
-        from PyQt6.QtCore import QTime
 
         form = CakeMemoForm()
 
         # Set non-default values
-        form.venue_buttons["il_gusto"].setChecked(True)
-        form.delivery_time_edit.setTime(QTime(19, 30))
-        form.delivery_add_button.click()
+        form.delivery_section.venue_buttons["il_gusto"].setChecked(True)
+        form.delivery_section.delivery_hour_spin.setValue(19)
+        form.delivery_section.delivery_minute_spin.setValue(30)
+        form.delivery_section.delivery_add_button.click()
         form.room_number_edit.setText("0412")
 
         # Set flavor to second option (chocolate)
         form.flavor_combo.setCurrentIndex(1)
         form.written_text_edit.setText("Test Message")
-        form.pax_spinbox.setValue(5)
+        form.pax_combo.setCurrentIndex(4)  # Set to 5
         form.qty_spinbox.setValue(3)
-        form.charge_buttons[CHARGE_COMPLIMENTARY].setChecked(True)
-        form.complimentary_by_edit.setText("Manager Name")
+        form.charge_section.charge_buttons[CHARGE_COMPLIMENTARY].setChecked(True)
+        form.charge_section.complimentary_by_edit.setText("Manager Name")
 
         # Now reset
         form.reset()
 
         # Verify defaults
         # Venue: no button should be checked
-        any_checked = any(btn.isChecked() for btn in form.venue_buttons.values())
+        any_checked = any(btn.isChecked() for btn in form.delivery_section.venue_buttons.values())
         self.assertFalse(any_checked)
-        self.assertTrue(form.delivery_confirmation_frame.isHidden())
+        self.assertTrue(form.delivery_section.delivery_confirmation_frame.isHidden())
 
         # Room number: empty
         self.assertEqual(form.room_number_edit.text(), "")
@@ -776,39 +776,152 @@ class TestCakeMemoForm(unittest.TestCase):
         self.assertEqual(form.written_text_edit.text(), "")
 
         # Pax: 1
-        self.assertEqual(form.pax_spinbox.value(), 1)
+        self.assertEqual(form.pax_combo.currentData(), 1)
 
         # Qty: 1
         self.assertEqual(form.qty_spinbox.value(), 1)
 
         # Charge: Paid
-        self.assertTrue(form.charge_buttons[CHARGE_PAID].isChecked())
-        self.assertEqual(form.complimentary_by_edit.text(), "")
-        self.assertTrue(form.complimentary_by_frame.isHidden())
+        self.assertTrue(form.charge_section.charge_buttons[CHARGE_PAID].isChecked())
+        self.assertEqual(form.charge_section.complimentary_by_edit.text(), "")
+        self.assertTrue(form.charge_section.complimentary_by_frame.isHidden())
 
-    def test_pax_spinbox_read_only_but_programmable(self):
+    def test_pax_combo_non_editable(self):
         """
-        Test: Pax QSpinBox is read-only (isReadOnly() == True) but value can still
-        be changed programmatically via stepUp()/stepDown()/setValue().
+        Test: Pax QComboBox is non-editable and can be programmatically changed via setCurrentIndex().
+        Verify the combo contains values 1-50 and currentData() returns the numeric value.
         """
         from OPTIONS.cake_memo.form import CakeMemoForm
 
         form = CakeMemoForm()
 
-        # Verify it is read-only
-        self.assertTrue(form.pax_spinbox.isReadOnly())
+        # Verify it is non-editable
+        self.assertFalse(form.pax_combo.isEditable())
 
-        # Verify programmatic changes still work
-        form.pax_spinbox.setValue(5)
-        self.assertEqual(form.pax_spinbox.value(), 5)
+        # Verify combo has 50 items (1-50)
+        self.assertEqual(form.pax_combo.count(), 50)
 
-        # Verify stepUp works
-        form.pax_spinbox.stepUp()
-        self.assertEqual(form.pax_spinbox.value(), 6)
+        # Verify default is 1 (index 0)
+        self.assertEqual(form.pax_combo.currentData(), 1)
 
-        # Verify stepDown works
-        form.pax_spinbox.stepDown()
-        self.assertEqual(form.pax_spinbox.value(), 5)
+        # Verify setting by index works
+        form.pax_combo.setCurrentIndex(4)  # Set to index 4, which is value 5
+        self.assertEqual(form.pax_combo.currentData(), 5)
+
+        # Verify display text is correct
+        self.assertEqual(form.pax_combo.currentText(), "5")
+
+        # Verify setting to last item works
+        form.pax_combo.setCurrentIndex(49)  # Last item, value 50
+        self.assertEqual(form.pax_combo.currentData(), 50)
+
+    def test_pax_combo_round_trip_in_form_data(self):
+        """
+        Test: Pax combo value flows correctly through get_form_data() and set_form_data()
+        using the same pattern as flavor_combo.
+        """
+        from OPTIONS.cake_memo.form import CakeMemoForm
+
+        form1 = CakeMemoForm()
+
+        # Set pax to a non-default value
+        form1.pax_combo.setCurrentIndex(9)  # Set to value 10
+        self.assertEqual(form1.pax_combo.currentData(), 10)
+
+        # Get form data
+        data = form1.get_form_data()
+        self.assertEqual(data["pax"], 10)
+
+        # Create a new form and set data
+        form2 = CakeMemoForm()
+        form2.set_form_data(data)
+
+        # Verify pax is set correctly in form2
+        self.assertEqual(form2.pax_combo.currentData(), 10)
+
+        # Verify round-trip
+        data2 = form2.get_form_data()
+        self.assertEqual(data2["pax"], data["pax"])
+
+
+    def test_delivery_spinbox_hour_minute_flow(self):
+        """
+        Test: Delivery hour and minute spinboxes flow correctly through get_form_data().
+        Verify the exact "IL GUSTO 19.30PM" example via spinboxes instead of QTimeEdit.
+        """
+        from OPTIONS.cake_memo.form import CakeMemoForm
+
+        form = CakeMemoForm()
+
+        # Select Il Gusto
+        form.delivery_section.venue_buttons["il_gusto"].setChecked(True)
+
+        # Set time via spinboxes: hour=19, minute=30
+        form.delivery_section.delivery_hour_spin.setValue(19)
+        form.delivery_section.delivery_minute_spin.setValue(30)
+
+        # Click Add to lock it in
+        form.delivery_section.delivery_add_button.click()
+
+        # Get form data
+        form_data = form.get_form_data()
+
+        # Verify the spinbox values are correctly returned
+        self.assertEqual(form_data["hour"], 19)
+        self.assertEqual(form_data["minute"], 30)
+        self.assertEqual(form_data["venue"], "il_gusto")
+
+        # Verify the exact composed string
+        composed = compose_provided_at("il_gusto", 19, 30)
+        self.assertEqual(composed, "IL GUSTO 19.30PM")
+
+    def test_delivery_section_standalone_construction_no_crash(self):
+        """Test: DeliverySection() constructs standalone without crash."""
+        from OPTIONS.cake_memo.delivery_section import DeliverySection
+
+        section = DeliverySection()
+        self.assertIsNotNone(section)
+        self.assertIsNotNone(section.venue_buttons)
+        self.assertIsNotNone(section.delivery_confirmation_frame)
+        self.assertIsNotNone(section.delivery_hour_spin)
+        self.assertIsNotNone(section.delivery_minute_spin)
+
+        # Call reset to verify no crash
+        section.reset()
+
+    def test_charge_section_standalone_construction_no_crash(self):
+        """Test: ChargeSection() constructs standalone without crash (construction-order safety)."""
+        from OPTIONS.cake_memo.charge_section import ChargeSection
+
+        section = ChargeSection()
+        self.assertIsNotNone(section)
+        self.assertIsNotNone(section.charge_buttons)
+        self.assertIsNotNone(section.complimentary_by_frame)
+
+        # Call reset to verify no crash
+        section.reset()
+
+    def test_charge_section_construction_order_safety(self):
+        """
+        Test: ChargeSection builds complimentary_by_frame BEFORE wiring charge buttons.
+        Verify that setting Paid (default) doesn't crash - this proves the construction order is correct.
+        """
+        from OPTIONS.cake_memo.charge_section import ChargeSection
+
+        # Create 3 instances to ensure consistent behavior
+        for _ in range(3):
+            section = ChargeSection()
+            # Verify the default state: Paid is checked, complimentary_by_frame is hidden
+            self.assertTrue(section.charge_buttons[CHARGE_PAID].isChecked())
+            self.assertTrue(section.complimentary_by_frame.isHidden())
+
+            # Verify switching to Complimentary shows the frame
+            section.charge_buttons[CHARGE_COMPLIMENTARY].setChecked(True)
+            self.assertFalse(section.complimentary_by_frame.isHidden())
+
+            # Verify switching back to Paid hides the frame
+            section.charge_buttons[CHARGE_PAID].setChecked(True)
+            self.assertTrue(section.complimentary_by_frame.isHidden())
 
 
 class TestCakeMemoOptionWidget(unittest.TestCase):
@@ -904,7 +1017,6 @@ class TestCakeMemoOptionWidget(unittest.TestCase):
         """
         import os
         import tempfile
-        from PyQt6.QtCore import QTime
         from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -923,12 +1035,13 @@ class TestCakeMemoOptionWidget(unittest.TestCase):
             widget.form.room_number_edit.setText("0412")
             widget.form.flavor_combo.setCurrentIndex(0)  # strawberry
             widget.form.written_text_edit.setText("Happy Birthday")
-            widget.form.pax_spinbox.setValue(3)
+            widget.form.pax_combo.setCurrentIndex(2)  # 3
             widget.form.qty_spinbox.setValue(2)
-            widget.form.venue_buttons["il_gusto"].setChecked(True)
-            widget.form.delivery_time_edit.setTime(QTime(19, 30))
-            widget.form.delivery_add_button.click()
-            widget.form.charge_buttons[CHARGE_PAID].setChecked(True)
+            widget.form.delivery_section.venue_buttons["il_gusto"].setChecked(True)
+            widget.form.delivery_section.delivery_hour_spin.setValue(19)
+            widget.form.delivery_section.delivery_minute_spin.setValue(30)
+            widget.form.delivery_section.delivery_add_button.click()
+            widget.form.charge_section.charge_buttons[CHARGE_PAID].setChecked(True)
 
             # Save
             widget.handle_save()
@@ -953,7 +1066,6 @@ class TestCakeMemoOptionWidget(unittest.TestCase):
         """
         import os
         import tempfile
-        from PyQt6.QtCore import QTime
         from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
         from MODULES.cake_memo.document import generate_cake_memo_document
 
@@ -986,9 +1098,10 @@ class TestCakeMemoOptionWidget(unittest.TestCase):
 
             widget.form.room_number_edit.setText(room_num)
             widget.form.flavor_combo.setCurrentIndex(0)
-            widget.form.venue_buttons["il_gusto"].setChecked(True)
-            widget.form.delivery_time_edit.setTime(QTime(19, 30))
-            widget.form.delivery_add_button.click()
+            widget.form.delivery_section.venue_buttons["il_gusto"].setChecked(True)
+            widget.form.delivery_section.delivery_hour_spin.setValue(19)
+            widget.form.delivery_section.delivery_minute_spin.setValue(30)
+            widget.form.delivery_section.delivery_add_button.click()
 
             # Save
             widget.handle_save()
@@ -1008,7 +1121,6 @@ class TestCakeMemoOptionWidget(unittest.TestCase):
         """
         import os
         import tempfile
-        from PyQt6.QtCore import QTime
         from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
         from MODULES.cake_memo.document import generate_cake_memo_document
         from MODULES.cake_memo.parser import parse_cake_memo_document
@@ -1041,9 +1153,10 @@ class TestCakeMemoOptionWidget(unittest.TestCase):
             # Modify the form
             widget.form.room_number_edit.setText("0102")
             widget.form.written_text_edit.setText("Modified")
-            widget.form.venue_buttons["il_gusto"].setChecked(True)
-            widget.form.delivery_time_edit.setTime(QTime(19, 30))
-            widget.form.delivery_add_button.click()
+            widget.form.delivery_section.venue_buttons["il_gusto"].setChecked(True)
+            widget.form.delivery_section.delivery_hour_spin.setValue(19)
+            widget.form.delivery_section.delivery_minute_spin.setValue(30)
+            widget.form.delivery_section.delivery_add_button.click()
 
             # Save
             widget.handle_save()
@@ -1063,7 +1176,6 @@ class TestCakeMemoOptionWidget(unittest.TestCase):
         """Test: handle_close() in create mode does NOT write any file to disk."""
         import os
         import tempfile
-        from PyQt6.QtCore import QTime
         from OPTIONS.cake_memo.widget import CakeMemoOptionWidget
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1073,9 +1185,10 @@ class TestCakeMemoOptionWidget(unittest.TestCase):
 
             # Fill in form data
             widget.form.room_number_edit.setText("0412")
-            widget.form.venue_buttons["il_gusto"].setChecked(True)
-            widget.form.delivery_time_edit.setTime(QTime(19, 30))
-            widget.form.delivery_add_button.click()
+            widget.form.delivery_section.venue_buttons["il_gusto"].setChecked(True)
+            widget.form.delivery_section.delivery_hour_spin.setValue(19)
+            widget.form.delivery_section.delivery_minute_spin.setValue(30)
+            widget.form.delivery_section.delivery_add_button.click()
 
             # Close without saving
             widget.handle_close()
