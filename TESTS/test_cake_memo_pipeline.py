@@ -596,13 +596,13 @@ class TestCakeMemoForm(unittest.TestCase):
         for venue_key, expected_label in venue_options:
             with self.subTest(venue=venue_key):
                 # Initially not visible
-                self.assertFalse(form.delivery_confirmation_frame.isVisible())
+                self.assertTrue(form.delivery_confirmation_frame.isHidden())
 
                 # Click the radio button
                 form.venue_buttons[venue_key].setChecked(True)
 
                 # Confirmation subsection should now be visible
-                self.assertTrue(form.delivery_confirmation_frame.isVisible())
+                self.assertFalse(form.delivery_confirmation_frame.isHidden())
 
                 # Label should show the correct venue name
                 expected_text = f"Provide at: {expected_label}"
@@ -652,23 +652,23 @@ class TestCakeMemoForm(unittest.TestCase):
         form = CakeMemoForm()
 
         # Initially should be hidden (Paid is default)
-        self.assertFalse(form.complimentary_by_frame.isVisible())
+        self.assertTrue(form.complimentary_by_frame.isHidden())
 
         # Select Complimentary
         form.charge_buttons[CHARGE_COMPLIMENTARY].setChecked(True)
-        self.assertTrue(form.complimentary_by_frame.isVisible())
+        self.assertFalse(form.complimentary_by_frame.isHidden())
 
         # Select Paid
         form.charge_buttons[CHARGE_PAID].setChecked(True)
-        self.assertFalse(form.complimentary_by_frame.isVisible())
+        self.assertTrue(form.complimentary_by_frame.isHidden())
 
         # Select Pending
         form.charge_buttons[CHARGE_PENDING].setChecked(True)
-        self.assertFalse(form.complimentary_by_frame.isVisible())
+        self.assertTrue(form.complimentary_by_frame.isHidden())
 
         # Select Complimentary again
         form.charge_buttons[CHARGE_COMPLIMENTARY].setChecked(True)
-        self.assertTrue(form.complimentary_by_frame.isVisible())
+        self.assertFalse(form.complimentary_by_frame.isHidden())
 
     def test_set_form_data_get_form_data_round_trip(self):
         """
@@ -781,7 +781,7 @@ class TestCakeMemoForm(unittest.TestCase):
         # Venue: no button should be checked
         any_checked = any(btn.isChecked() for btn in form.venue_buttons.values())
         self.assertFalse(any_checked)
-        self.assertFalse(form.delivery_confirmation_frame.isVisible())
+        self.assertTrue(form.delivery_confirmation_frame.isHidden())
 
         # Room number: empty
         self.assertEqual(form.room_number_edit.text(), "")
@@ -801,7 +801,7 @@ class TestCakeMemoForm(unittest.TestCase):
         # Charge: Paid
         self.assertTrue(form.charge_buttons[CHARGE_PAID].isChecked())
         self.assertEqual(form.complimentary_by_edit.text(), "")
-        self.assertFalse(form.complimentary_by_frame.isVisible())
+        self.assertTrue(form.complimentary_by_frame.isHidden())
 
     def test_pax_spinbox_read_only_but_programmable(self):
         """

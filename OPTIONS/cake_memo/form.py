@@ -235,6 +235,29 @@ class CakeMemoForm(QWidget):
         charge_row = QHBoxLayout()
         charge_row.addWidget(QLabel("Charge:"))
 
+        # Complimentary-by field must exist BEFORE the charge radio buttons are wired up and
+        # default-checked below: setChecked(True) fires `toggled` synchronously, which invokes
+        # _on_charge_selection_changed, which references self.complimentary_by_frame. Creating
+        # it first avoids a construction-order crash (accessing a not-yet-created attribute from
+        # inside a signal handler triggered mid-construction).
+        self.complimentary_by_frame = QFrame()
+        self.complimentary_by_frame.setStyleSheet("""
+            QFrame {
+                background-color: #FFF8F0;
+                border: 1px solid #FFDDAA;
+                border-radius: 4px;
+                padding: 8px;
+            }
+        """)
+        self.complimentary_by_frame.setVisible(False)
+
+        comp_layout = QHBoxLayout(self.complimentary_by_frame)
+        comp_layout.addWidget(QLabel("Complimentary by:"))
+        self.complimentary_by_edit = QLineEdit()
+        self.complimentary_by_edit.setPlaceholderText("e.g., Manager Name")
+        comp_layout.addWidget(self.complimentary_by_edit)
+        comp_layout.addStretch()
+
         self.charge_group = QButtonGroup()
         self.charge_buttons = {}
 
@@ -256,26 +279,6 @@ class CakeMemoForm(QWidget):
 
         charge_row.addStretch()
         layout.addLayout(charge_row)
-
-        # Complimentary by field (hidden by default)
-        self.complimentary_by_frame = QFrame()
-        self.complimentary_by_frame.setStyleSheet("""
-            QFrame {
-                background-color: #FFF8F0;
-                border: 1px solid #FFDDAA;
-                border-radius: 4px;
-                padding: 8px;
-            }
-        """)
-        self.complimentary_by_frame.setVisible(False)
-
-        comp_layout = QHBoxLayout(self.complimentary_by_frame)
-        comp_layout.addWidget(QLabel("Complimentary by:"))
-        self.complimentary_by_edit = QLineEdit()
-        self.complimentary_by_edit.setPlaceholderText("e.g., Manager Name")
-        comp_layout.addWidget(self.complimentary_by_edit)
-        comp_layout.addStretch()
-
         layout.addWidget(self.complimentary_by_frame)
 
         return frame
